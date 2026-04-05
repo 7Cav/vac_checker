@@ -26,6 +26,8 @@ class Listener
             return;
         }
 
+        \XF::logError('[VAC-DEBUG] entityPreSave fired for Thread. isInsert=' . ($entity->isInsert() ? 'true' : 'false') . ' node_id=' . $entity->node_id);
+
         if (!$entity->isInsert()) {
             return;
         }
@@ -35,6 +37,7 @@ class Listener
         }
 
         self::$pendingNewThreads->attach($entity);
+        \XF::logError('[VAC-DEBUG] entityPreSave: Thread marked as pending new insert.');
     }
 
     /**
@@ -49,7 +52,10 @@ class Listener
             return;
         }
 
+        \XF::logError('[VAC-DEBUG] entityPostSave fired for Thread id=' . $entity->thread_id . ' node_id=' . $entity->node_id);
+
         if (self::$pendingNewThreads === null || !self::$pendingNewThreads->contains($entity)) {
+            \XF::logError('[VAC-DEBUG] entityPostSave: Thread not in pending set — skipping (was an update, not an insert).');
             return;
         }
 
@@ -57,9 +63,14 @@ class Listener
         self::$pendingNewThreads->detach($entity);
 
         $configuredNodeId = (int) \XF::options()->steamCheckerNodeId;
+        \XF::logError('[VAC-DEBUG] entityPostSave: thread node_id=' . $entity->node_id . ' configured node_id=' . $configuredNodeId);
+
         if ($entity->node_id !== $configuredNodeId) {
+            \XF::logError('[VAC-DEBUG] entityPostSave: Node ID mismatch — not an enlistment thread, skipping.');
             return;
         }
+
+        \XF::logError('[VAC-DEBUG] entityPostSave: Launching SteamChecker for thread ' . $entity->thread_id);
 
         try {
             $checker = new SteamChecker($entity);

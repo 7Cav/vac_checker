@@ -26,6 +26,8 @@ class SteamChecker
 
     public function run(): void
     {
+        \XF::logError('[VAC-DEBUG] SteamChecker::run() started for thread ' . $this->thread->thread_id);
+
         if (!$this->apiKey) {
             \XF::logError('[Cav7/SteamChecker] Steam API key is not configured.');
             return;
@@ -36,6 +38,8 @@ class SteamChecker
             return;
         }
 
+        \XF::logError('[VAC-DEBUG] Config OK. apiKey=set botUserId=' . $this->botUserId . ' first_post_id=' . $this->thread->first_post_id);
+
         /** @var \XF\Entity\Post|null $post */
         $post = \XF::em()->find('XF:Post', $this->thread->first_post_id);
         if (!$post) {
@@ -44,16 +48,21 @@ class SteamChecker
         }
 
         $message = $post->message;
+        \XF::logError('[VAC-DEBUG] Post loaded. Message length=' . strlen($message));
 
         // --- Platform check -------------------------------------------------
         $platform = $this->extractNextLineField($message, 'Platform and Game Selection');
+        \XF::logError('[VAC-DEBUG] Platform extracted: ' . var_export($platform, true));
+
         if ($platform === null || stripos(trim($platform), 'PC') !== 0) {
-            // Non-PC application — no Steam check needed, no reply posted.
+            \XF::logError('[VAC-DEBUG] Non-PC platform or field not found — skipping.');
             return;
         }
 
         // --- Steam ID extraction --------------------------------------------
         $rawSteamField = $this->extractNextLineField($message, 'Steam64ID or Steam Account URL/Link');
+        \XF::logError('[VAC-DEBUG] Raw Steam field extracted: ' . var_export($rawSteamField, true));
+
         if ($rawSteamField === null) {
             $this->postReply($this->buildUnresolvableMessage('(field not found in post)'));
             return;
@@ -64,6 +73,7 @@ class SteamChecker
         // --- Steam ID resolution --------------------------------------------
         try {
             $steamId64 = $this->resolveSteamId($rawSteamId);
+            \XF::logError('[VAC-DEBUG] Resolved SteamID64: ' . var_export($steamId64, true));
         } catch (\Throwable $e) {
             \XF::logException($e, false, '[Cav7/SteamChecker] Steam ID resolution error: ');
             $this->postReply($this->buildUnresolvableMessage($rawSteamId));
@@ -78,6 +88,7 @@ class SteamChecker
         // --- Ban data fetch --------------------------------------------------
         try {
             $banData = $this->fetchBanData($steamId64);
+            \XF::logError('[VAC-DEBUG] Ban data fetched: ' . json_encode($banData));
         } catch (\Throwable $e) {
             \XF::logException($e, false, '[Cav7/SteamChecker] Steam API error: ');
             $this->postReply($this->buildApiErrorMessage($steamId64));
@@ -85,6 +96,7 @@ class SteamChecker
         }
 
         // --- Post result ----------------------------------------------------
+        \XF::logError('[VAC-DEBUG] Calling postReply.');
         $this->postReply($this->buildBanReportMessage($steamId64, $banData));
     }
 
@@ -342,12 +354,16 @@ class SteamChecker
 
     protected function postReply(string $message): void
     {
+        \XF::logError('[VAC-DEBUG] postReply() called. botUserId=' . $this->botUserId);
+
         /** @var \XF\Entity\User|null $botUser */
         $botUser = \XF::em()->find('XF:User', $this->botUserId);
         if (!$botUser) {
             \XF::logError('[Cav7/SteamChecker] Bot user ID ' . $this->botUserId . ' not found.');
             return;
         }
+
+        \XF::logError('[VAC-DEBUG] Bot user found: ' . $botUser->username . '. Attempting to post reply.');
 
         \XF::asVisitor($botUser, function () use ($message) {
             /** @var \XF\Service\Post\Creator $creator */
@@ -365,7 +381,9 @@ class SteamChecker
                 return;
             }
 
+            \XF::logError('[VAC-DEBUG] Post validated OK. Saving.');
             $creator->save();
+            \XF::logError('[VAC-DEBUG] Post saved successfully.');
         });
     }
 }
