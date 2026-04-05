@@ -366,8 +366,10 @@ class SteamChecker
         \XF::logError('[VAC-DEBUG] Bot user found: ' . $botUser->username . '. Attempting to post reply.');
 
         \XF::asVisitor($botUser, function () use ($message) {
-            /** @var \XF\Service\Post\Creator $creator */
-            $creator = \XF::service('XF:Post\Creator', $this->thread);
+            // \XF::service() in XF 2.3 appends 'Service' to the resolved class
+            // name, but XF\Service\Post\Creator was never renamed. Instantiate
+            // directly to bypass the factory's name mangling.
+            $creator = new \XF\Service\Post\Creator(\XF::app(), $this->thread);
             $creator->setIsAutomated();
             $creator->setContent($message, false);
 
