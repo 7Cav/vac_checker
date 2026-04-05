@@ -377,6 +377,7 @@ class SteamChecker
         $post->message    = $message;
         $post->message_state = 'visible';
         $post->ip_id      = 0;
+        $post->position   = $this->thread->reply_count + 1;
 
         $post->save();
 
