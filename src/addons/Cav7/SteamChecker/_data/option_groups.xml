@@ -1,7 +1,11 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <option_groups>
-    <option_group group_id="steamChecker" display_order="10" is_addon_default="1">
-        <title>Steam VAC Checker</title>
-        <description>Configure automatic Steam VAC/Game ban checking for enlistment applications.</description>
-    </option_group>
+    <group group_id="steamChecker"
+           display_order="10"
+           debug_only="0"
+           is_addon_default="1"
+           addon_id="Cav7/SteamChecker">
+        <title><![CDATA[Steam VAC Checker]]></title>
+        <description><![CDATA[Configure automatic Steam VAC/Game ban checking for enlistment applications.]]></description>
+    </group>
 </option_groups>
