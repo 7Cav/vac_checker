@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<phrases>
+
+    <!-- Option group -->
+    <phrase title="option_group.steamChecker" version_id="1000131" version_string="1.0.1"><![CDATA[Steam VAC Checker]]></phrase>
+    <phrase title="option_group_description.steamChecker" version_id="1000131" version_string="1.0.1"><![CDATA[Configure automatic Steam VAC/Game ban checking for enlistment applications.]]></phrase>
+
+    <!-- Options -->
+    <phrase title="option.steamCheckerApiKey" version_id="1000131" version_string="1.0.1"><![CDATA[Steam API Key]]></phrase>
+    <phrase title="option_explain.steamCheckerApiKey" version_id="1000131" version_string="1.0.1"><![CDATA[Your Steam Web API key. Obtain one from https://steamcommunity.com/dev/apikey]]></phrase>
+
+    <phrase title="option.steamCheckerBotUserId" version_id="1000131" version_string="1.0.1"><![CDATA[Bot User ID]]></phrase>
+    <phrase title="option_explain.steamCheckerBotUserId" version_id="1000131" version_string="1.0.1"><![CDATA[The XenForo user ID of the account that will post VAC check results in each enlistment thread. Set to 0 to disable posting.]]></phrase>
+
+    <phrase title="option.steamCheckerNodeId" version_id="1000131" version_string="1.0.1"><![CDATA[Enlistment Node ID]]></phrase>
+    <phrase title="option_explain.steamCheckerNodeId" version_id="1000131" version_string="1.0.1"><![CDATA[The forum node ID where enlistment applications are posted. New threads created in this node will trigger a Steam VAC check. Default: 325.]]></phrase>
+
+</phrases>

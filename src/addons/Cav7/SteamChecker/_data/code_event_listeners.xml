@@ -1,30 +1,20 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<event_listeners>
-    <!--
-        Fires BEFORE save. We check isInsert() here while the entity is still
-        "new", and stash a reference so entityPostSave knows this was an insert.
-    -->
-    <event_listener
-        event_id="entity_pre_save"
-        execute_order="10"
-        callback_class="Cav7\SteamChecker\Listener"
-        callback_method="entityPreSave"
-        hint="XF:Thread"
-        active="1"
-        description="Steam VAC Checker: mark new thread inserts before save"
-    />
+<?xml version="1.0" encoding="utf-8"?>
+<code_event_listeners>
 
-    <!--
-        Fires AFTER save. Triggers the VAC check only for threads that were
-        marked as inserts by the entity_pre_save listener above.
-    -->
-    <event_listener
-        event_id="entity_post_save"
-        execute_order="10"
-        callback_class="Cav7\SteamChecker\Listener"
-        callback_method="entityPostSave"
-        hint="XF:Thread"
-        active="1"
-        description="Steam VAC Checker: trigger check on new enlistment threads"
-    />
-</event_listeners>
+    <listener event_id="entity_pre_save"
+              execute_order="10"
+              callback_class="Cav7\SteamChecker\Listener"
+              callback_method="entityPreSave"
+              hint="XF:Thread"
+              addon_id="Cav7/SteamChecker"
+              active="true" />
+
+    <listener event_id="entity_post_save"
+              execute_order="10"
+              callback_class="Cav7\SteamChecker\Listener"
+              callback_method="entityPostSave"
+              hint="XF:Thread"
+              addon_id="Cav7/SteamChecker"
+              active="true" />
+
+</code_event_listeners>

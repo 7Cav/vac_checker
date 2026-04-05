@@ -1,53 +1,34 @@
 <?xml version="1.0" encoding="utf-8"?>
 <options>
+
     <option option_id="steamCheckerApiKey"
-            group_id="steamChecker"
-            display_order="10"
-            default_value=""
-            data_type="string"
             edit_format="textbox"
-            edit_format_params=""
-            sub_options=""
-            validation_class=""
-            validation_method=""
-            advanced="0"
-            debug_only="0"
+            data_type="string"
             addon_id="Cav7/SteamChecker">
-        <title><![CDATA[Steam API Key]]></title>
-        <explain><![CDATA[Your Steam Web API key. Obtain one from https://steamcommunity.com/dev/apikey]]></explain>
+        <default_value></default_value>
+        <edit_format_params></edit_format_params>
+        <sub_options></sub_options>
+        <relation group_id="steamChecker" display_order="10" />
     </option>
 
     <option option_id="steamCheckerBotUserId"
-            group_id="steamChecker"
-            display_order="20"
-            default_value="0"
-            data_type="integer"
             edit_format="textbox"
-            edit_format_params=""
-            sub_options=""
-            validation_class=""
-            validation_method=""
-            advanced="0"
-            debug_only="0"
+            data_type="integer"
             addon_id="Cav7/SteamChecker">
-        <title><![CDATA[Bot User ID]]></title>
-        <explain><![CDATA[The XenForo user ID of the account that will post VAC check results in each enlistment thread. Set to 0 to disable posting.]]></explain>
+        <default_value>0</default_value>
+        <edit_format_params></edit_format_params>
+        <sub_options></sub_options>
+        <relation group_id="steamChecker" display_order="20" />
     </option>
 
     <option option_id="steamCheckerNodeId"
-            group_id="steamChecker"
-            display_order="30"
-            default_value="325"
-            data_type="integer"
             edit_format="textbox"
-            edit_format_params=""
-            sub_options=""
-            validation_class=""
-            validation_method=""
-            advanced="0"
-            debug_only="0"
+            data_type="integer"
             addon_id="Cav7/SteamChecker">
-        <title><![CDATA[Enlistment Node ID]]></title>
-        <explain><![CDATA[The forum node ID where enlistment applications are posted. New threads created in this node will trigger a Steam VAC check. Default: 325.]]></explain>
+        <default_value>325</default_value>
+        <edit_format_params></edit_format_params>
+        <sub_options></sub_options>
+        <relation group_id="steamChecker" display_order="30" />
     </option>
+
 </options>
