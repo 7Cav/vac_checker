@@ -363,29 +363,23 @@ class SteamChecker
             return;
         }
 
-        \XF::logError('[VAC-DEBUG] Bot user found: ' . $botUser->username . '. Attempting to post reply.');
+        \XF::logError('[VAC-DEBUG] Bot user found: ' . $botUser->username . '. Saving post entity directly.');
 
-        \XF::asVisitor($botUser, function () use ($message) {
-            // \XF::service() in XF 2.3 appends 'Service' to the resolved class
-            // name, but XF\Service\Post\Creator was never renamed. Instantiate
-            // directly to bypass the factory's name mangling.
-            $creator = new \XF\Service\Post\Creator(\XF::app(), $this->thread);
-            $creator->setIsAutomated();
-            $creator->setContent($message, false);
+        // XF 2.3 removed XF\Service\Post\Creator entirely. Create the Post
+        // entity directly — the entity's own _postSave() handles updating
+        // the thread's reply count and last-post metadata.
+        /** @var \XF\Entity\Post $post */
+        $post = \XF::em()->create('XF:Post');
+        $post->thread_id  = $this->thread->thread_id;
+        $post->user_id    = $botUser->user_id;
+        $post->username   = $botUser->username;
+        $post->post_date  = \XF::$time;
+        $post->message    = $message;
+        $post->message_state = 'visible';
+        $post->ip_id      = 0;
 
-            $errors = [];
-            if (!$creator->validate($errors)) {
-                \XF::logError(
-                    '[Cav7/SteamChecker] Post validation failed for thread '
-                    . $this->thread->thread_id . ': '
-                    . implode('; ', $errors)
-                );
-                return;
-            }
+        $post->save();
 
-            \XF::logError('[VAC-DEBUG] Post validated OK. Saving.');
-            $creator->save();
-            \XF::logError('[VAC-DEBUG] Post saved successfully.');
-        });
+        \XF::logError('[VAC-DEBUG] Post saved. post_id=' . $post->post_id);
     }
 }
