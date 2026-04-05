@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<class_extensions>
+    <extension from_class="XF\Entity\Thread"
+               to_class="Cav7\SteamChecker\XF\Entity\Thread"
+               addon_id="Cav7/SteamChecker"
+               active="true" />
+</class_extensions>

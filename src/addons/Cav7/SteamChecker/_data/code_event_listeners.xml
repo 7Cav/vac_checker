@@ -1,20 +1,3 @@
 <?xml version="1.0" encoding="utf-8"?>
 <code_event_listeners>
-
-    <listener event_id="entity_pre_save"
-              execute_order="10"
-              callback_class="Cav7\SteamChecker\Listener"
-              callback_method="entityPreSave"
-              hint="XF:Thread"
-              addon_id="Cav7/SteamChecker"
-              active="true" />
-
-    <listener event_id="entity_post_save"
-              execute_order="10"
-              callback_class="Cav7\SteamChecker\Listener"
-              callback_method="entityPostSave"
-              hint="XF:Thread"
-              addon_id="Cav7/SteamChecker"
-              active="true" />
-
 </code_event_listeners>
