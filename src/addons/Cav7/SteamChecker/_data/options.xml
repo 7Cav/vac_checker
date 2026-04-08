@@ -31,4 +31,14 @@
         <relation group_id="steamChecker" display_order="30" />
     </option>
 
+    <option option_id="steamCheckerDebugLog"
+            edit_format="onoff"
+            data_type="boolean"
+            addon_id="Cav7/SteamChecker">
+        <default_value>0</default_value>
+        <edit_format_params></edit_format_params>
+        <sub_options></sub_options>
+        <relation group_id="steamChecker" display_order="40" />
+    </option>
+
 </options>

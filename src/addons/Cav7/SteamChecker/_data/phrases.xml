@@ -15,4 +15,7 @@
     <phrase title="option.steamCheckerNodeId" version_id="1000131" version_string="1.0.1"><![CDATA[Enlistment Node ID]]></phrase>
     <phrase title="option_explain.steamCheckerNodeId" version_id="1000131" version_string="1.0.1"><![CDATA[The forum node ID where enlistment applications are posted. New threads created in this node will trigger a Steam VAC check. Default: 325.]]></phrase>
 
+    <phrase title="option.steamCheckerDebugLog" version_id="1000131" version_string="1.0.1"><![CDATA[Enable Debug Logging]]></phrase>
+    <phrase title="option_explain.steamCheckerDebugLog" version_id="1000131" version_string="1.0.1"><![CDATA[Logs each step of the VAC check to the server error log. Turn off in production once everything is confirmed working.]]></phrase>
+
 </phrases>

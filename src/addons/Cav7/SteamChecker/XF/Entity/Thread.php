@@ -14,9 +14,11 @@ class Thread extends XFCP_Thread
 
         $configuredNodeId = (int) \XF::options()->steamCheckerNodeId;
 
-        \XF::logError('[VAC-DEBUG] Thread _postSave: thread_id=' . $this->thread_id
-            . ' node_id=' . $this->node_id
-            . ' configured_node_id=' . $configuredNodeId);
+        if (\XF::options()->steamCheckerDebugLog) {
+            \XF::logError('[VAC-DEBUG] Thread _postSave: thread_id=' . $this->thread_id
+                . ' node_id=' . $this->node_id
+                . ' configured_node_id=' . $configuredNodeId);
+        }
 
         if ($this->node_id !== $configuredNodeId) {
             return;
