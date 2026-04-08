@@ -4,7 +4,7 @@ namespace Cav7\SteamChecker\XF\Entity;
 
 class Post extends XFCP_Post
 {
-    protected function _postSave(): void
+    protected function _postSave()
     {
         parent::_postSave();
 
