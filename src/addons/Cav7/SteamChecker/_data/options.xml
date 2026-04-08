@@ -41,4 +41,14 @@
         <relation group_id="steamChecker" display_order="40" />
     </option>
 
+    <option option_id="steamCheckerAllowedRoleIds"
+            edit_format="textbox"
+            data_type="string"
+            addon_id="Cav7/SteamChecker">
+        <default_value></default_value>
+        <edit_format_params></edit_format_params>
+        <sub_options></sub_options>
+        <relation group_id="steamChecker" display_order="50" />
+    </option>
+
 </options>

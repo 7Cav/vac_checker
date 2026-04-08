@@ -4,4 +4,8 @@
                to_class="Cav7\SteamChecker\XF\Entity\Thread"
                addon_id="Cav7/SteamChecker"
                active="true" />
+    <extension from_class="XF\Entity\Post"
+               to_class="Cav7\SteamChecker\XF\Entity\Post"
+               addon_id="Cav7/SteamChecker"
+               active="true" />
 </class_extensions>
