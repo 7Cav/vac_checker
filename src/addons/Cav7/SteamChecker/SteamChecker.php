@@ -220,7 +220,7 @@ class SteamChecker
     }
 
     /**
-     * Resolves an s.team short link to a SteamID64 by following redirects 
+     * Resolves an s.team short link to a SteamID64 by following redirects
      * or fetching the page body if it's a friend invite link.
      */
     protected function resolveSteamShortLink(string $url): ?string
@@ -229,11 +229,18 @@ class SteamChecker
             $url = 'https://' . $url;
         }
 
+        // Friend invite links have the form s.team/p/{invite_code}/{confirm_token}.
+        // The confirmation token is only needed for the friend-accept UI; the invite
+        // code alone is a public profile shortlink that resolves without a Steam
+        // session. Strip the token so we land on the profile instead of the login page.
+        if (preg_match('#s\.team/p/([^/?]+)/[^/?]+#i', $url, $sm)) {
+            $url = 'https://s.team/p/' . $sm[1];
+            $this->debug('Stripped s.team invite token — fetching: ' . $url);
+        }
+
         // One GET request: follow all redirects and capture both the final
-        // URL and the response body. HEAD requests are not used here because
-        // s.team friend-invite links serve an HTML page (not a plain redirect)
-        // and some servers don't honour HEAD the same way as GET.
-        // A browser User-Agent is required — s.team returns a stub page for bots.
+        // URL and the response body. A browser User-Agent is required —
+        // s.team returns a stub page for bots.
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
@@ -259,35 +266,10 @@ class SteamChecker
             return null;
         }
 
-        // Steam login redirect — happens with friend invite links (/user/ paths)
-        // because the server has no Steam session. Extract the target path from
-        // the 'goto' query parameter and try the Steam Community XML profile API,
-        // which does not require authentication.
+        // If we still end up on a login page (e.g. the invite code itself requires
+        // auth), there is nothing more we can do without a Steam session.
         if ($finalUrl && preg_match('#steamcommunity\.com/login/#i', $finalUrl)) {
-            $parsed = parse_url($finalUrl);
-            if (!empty($parsed['query'])) {
-                parse_str($parsed['query'], $params);
-                if (!empty($params['goto'])) {
-                    $profilePath = ltrim($params['goto'], '/');
-                    $xmlUrl = 'https://steamcommunity.com/' . $profilePath . '?xml=1';
-                    $this->debug('Login redirect detected — trying XML API: ' . $xmlUrl);
-                    $xmlBody = $this->httpGet($xmlUrl);
-                    $this->debug('XML response length: ' . strlen($xmlBody ?? ''));
-                    if ($xmlBody) {
-                        $this->debug('XML snippet: ' . substr(preg_replace('/\s+/', ' ', $xmlBody), 0, 300));
-                    }
-                    if ($xmlBody && preg_match('/<steamID64>(\d{17})<\/steamID64>/i', $xmlBody, $m)) {
-                        $this->debug('SteamID64 from XML: ' . $m[1]);
-                        return $m[1];
-                    }
-                    // Fallback: bare 17-digit scan on the XML body
-                    if ($xmlBody && preg_match('/\b(7656119\d{10})\b/', $xmlBody, $m)) {
-                        $this->debug('SteamID64 from XML body scan: ' . $m[1]);
-                        return $m[1];
-                    }
-                    $this->debug('XML API attempt yielded no SteamID64.');
-                }
-            }
+            $this->debug('Steam login redirect — cannot resolve without session.');
             return null;
         }
 
