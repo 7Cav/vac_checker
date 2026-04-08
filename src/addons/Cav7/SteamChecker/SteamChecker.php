@@ -225,37 +225,44 @@ class SteamChecker
      */
     protected function resolveSteamShortLink(string $url): ?string
     {
-        // Ensure the URL has a scheme for cURL
         if (!preg_match('#^https?://#i', $url)) {
             $url = 'https://' . $url;
         }
 
-        // 1. Follow the HTTP redirect to get the final destination
-        $finalUrl = $this->followRedirect($url);
-        if (!$finalUrl) {
-            $finalUrl = $url; // Fallback just in case
+        // One GET request: follow all redirects and capture both the final
+        // URL and the response body. HEAD requests are not used here because
+        // s.team friend-invite links serve an HTML page (not a plain redirect)
+        // and some servers don't honour HEAD the same way as GET.
+        // A browser User-Agent is required — s.team returns a stub page for bots.
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS      => 5,
+            CURLOPT_TIMEOUT        => 10,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+        ]);
+
+        $body     = curl_exec($ch);
+        $errno    = curl_errno($ch);
+        $finalUrl = curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
+        curl_close($ch);
+
+        if ($errno !== 0 || $body === false) {
+            return null;
         }
-        
-        // 2. If the redirect took us directly to a standard profile page, resolve it
-        if (preg_match('#steamcommunity\.com/(id|profiles)/#i', $finalUrl)) {
+
+        // If the redirect chain landed on a recognisable Steam profile URL, done.
+        if ($finalUrl && preg_match('#steamcommunity\.com/(id|profiles)/#i', $finalUrl)) {
             return $this->resolveSteamId($finalUrl);
         }
 
-        // 3. For friend invites (/user/...), fetch the destination's HTML body
-        // (httpGet has follow location disabled, so we MUST pass the finalUrl here)
-        $body = $this->httpGet($finalUrl);
-        if ($body) {
-            // The most foolproof way to find the ID on a Steam User page is 
-            // extracting the 17-digit SteamID64 directly from the source code.
-            // All modern Steam accounts start with 7656119.
-            if (preg_match('/(7656119\d{10})/', $body, $m)) {
-                return $m[1]; 
-            }
-            
-            // Fallback: look for a vanity URL in the JSON data or meta tags
-            if (preg_match('#steamcommunity\.com\\\\?/(id|profiles)\\\\?/([^"\'\\/?\s]+)#i', $body, $m)) {
-                return $this->resolveVanityUrl(stripslashes($m[2]));
-            }
+        // Scan the response body for a SteamID64.
+        // Steam embeds the 17-digit ID in page JSON, meta tags, and JS variables.
+        if ($body && preg_match('/\b(7656119\d{10})\b/', $body, $m)) {
+            return $m[1];
         }
 
         return null;
