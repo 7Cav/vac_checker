@@ -220,6 +220,46 @@ class SteamChecker
     }
 
     /**
+     * Resolves an s.team short link to a SteamID64 by following redirects 
+     * or fetching the page body if it's a friend invite link.
+     */
+    protected function resolveSteamShortLink(string $url): ?string
+    {
+        // Ensure the URL has a scheme for cURL
+        if (!preg_match('#^https?://#i', $url)) {
+            $url = 'https://' . $url;
+        }
+
+        // 1. Try to follow the HTTP redirect first
+        $finalUrl = $this->followRedirect($url);
+        
+        // If the redirect took us to a steamcommunity profile/id page, recursively resolve it
+        if ($finalUrl && stripos($finalUrl, 'steamcommunity.com') !== false) {
+            // Prevent infinite loops if it just redirected to the homepage
+            if (preg_match('|steamcommunity\.com/(id|profiles)/|i', $finalUrl)) {
+                return $this->resolveSteamId($finalUrl);
+            }
+        }
+
+        // 2. If it's a friend-invite link (s.team/p/...), it serves an HTML page.
+        // We need to fetch the body and scrape the Steam URL from the javascript/meta tags.
+        $body = $this->httpGet($url);
+        if ($body) {
+            // Look for the SteamID64 directly in the JSON data or meta tags
+            if (preg_match('/steamcommunity\.com\\\\?\/profiles\\\\?\/(\d{17})/i', $body, $m)) {
+                return $m[1]; // Found raw Steam64
+            }
+            
+            // Look for a vanity URL in the JSON data or meta tags
+            if (preg_match('/steamcommunity\.com\\\\?\/id\\\\?\/([^"\'\\/?\s]+)/i', $body, $m)) {
+                return $this->resolveVanityUrl(stripslashes($m[1]));
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Calls the Steam GetPlayerBans API and returns the player record array.
      *
      * @throws \RuntimeException on HTTP or API failure
