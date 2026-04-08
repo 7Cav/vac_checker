@@ -235,8 +235,8 @@ class SteamChecker
         
         // If the redirect took us to a steamcommunity profile/id page, recursively resolve it
         if ($finalUrl && stripos($finalUrl, 'steamcommunity.com') !== false) {
-            // Prevent infinite loops if it just redirected to the homepage
-            if (preg_match('|steamcommunity\.com/(id|profiles)/|i', $finalUrl)) {
+            // FIXED: Swapped | delimiters to # so the (id|profiles) OR pipe doesn't break the regex
+            if (preg_match('#steamcommunity\.com/(id|profiles)/#i', $finalUrl)) {
                 return $this->resolveSteamId($finalUrl);
             }
         }
