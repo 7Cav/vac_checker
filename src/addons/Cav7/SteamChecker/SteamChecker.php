@@ -250,6 +250,11 @@ class SteamChecker
         $finalUrl = curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
         curl_close($ch);
 
+        $this->debug('s.team fetch: errno=' . $errno . ' finalUrl=' . $finalUrl . ' bodyLen=' . strlen($body ?: ''));
+        if ($body) {
+            $this->debug('s.team body snippet: ' . substr(preg_replace('/\s+/', ' ', $body), 0, 500));
+        }
+
         if ($errno !== 0 || $body === false) {
             return null;
         }
