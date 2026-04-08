@@ -230,29 +230,31 @@ class SteamChecker
             $url = 'https://' . $url;
         }
 
-        // 1. Try to follow the HTTP redirect first
+        // 1. Follow the HTTP redirect to get the final destination
         $finalUrl = $this->followRedirect($url);
+        if (!$finalUrl) {
+            $finalUrl = $url; // Fallback just in case
+        }
         
-        // If the redirect took us to a steamcommunity profile/id page, recursively resolve it
-        if ($finalUrl && stripos($finalUrl, 'steamcommunity.com') !== false) {
-            // FIXED: Swapped | delimiters to # so the (id|profiles) OR pipe doesn't break the regex
-            if (preg_match('#steamcommunity\.com/(id|profiles)/#i', $finalUrl)) {
-                return $this->resolveSteamId($finalUrl);
-            }
+        // 2. If the redirect took us directly to a standard profile page, resolve it
+        if (preg_match('#steamcommunity\.com/(id|profiles)/#i', $finalUrl)) {
+            return $this->resolveSteamId($finalUrl);
         }
 
-        // 2. If it's a friend-invite link (s.team/p/...), it serves an HTML page.
-        // We need to fetch the body and scrape the Steam URL from the javascript/meta tags.
-        $body = $this->httpGet($url);
+        // 3. For friend invites (/user/...), fetch the destination's HTML body
+        // (httpGet has follow location disabled, so we MUST pass the finalUrl here)
+        $body = $this->httpGet($finalUrl);
         if ($body) {
-            // Look for the SteamID64 directly in the JSON data or meta tags
-            if (preg_match('/steamcommunity\.com\\\\?\/profiles\\\\?\/(\d{17})/i', $body, $m)) {
-                return $m[1]; // Found raw Steam64
+            // The most foolproof way to find the ID on a Steam User page is 
+            // extracting the 17-digit SteamID64 directly from the source code.
+            // All modern Steam accounts start with 7656119.
+            if (preg_match('/(7656119\d{10})/', $body, $m)) {
+                return $m[1]; 
             }
             
-            // Look for a vanity URL in the JSON data or meta tags
-            if (preg_match('/steamcommunity\.com\\\\?\/id\\\\?\/([^"\'\\/?\s]+)/i', $body, $m)) {
-                return $this->resolveVanityUrl(stripslashes($m[1]));
+            // Fallback: look for a vanity URL in the JSON data or meta tags
+            if (preg_match('#steamcommunity\.com\\\\?/(id|profiles)\\\\?/([^"\'\\/?\s]+)#i', $body, $m)) {
+                return $this->resolveVanityUrl(stripslashes($m[2]));
             }
         }
 
