@@ -259,6 +259,38 @@ class SteamChecker
             return null;
         }
 
+        // Steam login redirect — happens with friend invite links (/user/ paths)
+        // because the server has no Steam session. Extract the target path from
+        // the 'goto' query parameter and try the Steam Community XML profile API,
+        // which does not require authentication.
+        if ($finalUrl && preg_match('#steamcommunity\.com/login/#i', $finalUrl)) {
+            $parsed = parse_url($finalUrl);
+            if (!empty($parsed['query'])) {
+                parse_str($parsed['query'], $params);
+                if (!empty($params['goto'])) {
+                    $profilePath = ltrim($params['goto'], '/');
+                    $xmlUrl = 'https://steamcommunity.com/' . $profilePath . '?xml=1';
+                    $this->debug('Login redirect detected — trying XML API: ' . $xmlUrl);
+                    $xmlBody = $this->httpGet($xmlUrl);
+                    $this->debug('XML response length: ' . strlen($xmlBody ?? ''));
+                    if ($xmlBody) {
+                        $this->debug('XML snippet: ' . substr(preg_replace('/\s+/', ' ', $xmlBody), 0, 300));
+                    }
+                    if ($xmlBody && preg_match('/<steamID64>(\d{17})<\/steamID64>/i', $xmlBody, $m)) {
+                        $this->debug('SteamID64 from XML: ' . $m[1]);
+                        return $m[1];
+                    }
+                    // Fallback: bare 17-digit scan on the XML body
+                    if ($xmlBody && preg_match('/\b(7656119\d{10})\b/', $xmlBody, $m)) {
+                        $this->debug('SteamID64 from XML body scan: ' . $m[1]);
+                        return $m[1];
+                    }
+                    $this->debug('XML API attempt yielded no SteamID64.');
+                }
+            }
+            return null;
+        }
+
         // If the redirect chain landed on a recognisable Steam profile URL, done.
         if ($finalUrl && preg_match('#steamcommunity\.com/(id|profiles)/#i', $finalUrl)) {
             return $this->resolveSteamId($finalUrl);
