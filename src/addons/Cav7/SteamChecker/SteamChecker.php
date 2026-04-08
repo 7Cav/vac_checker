@@ -177,13 +177,12 @@ class SteamChecker
             return $this->resolveVanityUrl($m[1]);
         }
 
-        // 4. s.team short link — follow HTTP redirects, then re-evaluate
+        // 4. s.team short link — fetch the page and scan for a Steam profile URL
+        //    in both the final redirect destination and the response body.
+        //    s.team/p/ friend-invite links serve an HTML page rather than doing
+        //    a plain HTTP redirect, so a HEAD request is not sufficient.
         if (stripos($raw, 's.team/') !== false) {
-            $expanded = $this->followRedirect($raw);
-            if ($expanded !== null && $expanded !== $raw) {
-                return $this->resolveSteamId($expanded);
-            }
-            return null;
+            return $this->resolveSteamShortLink($raw);
         }
 
         // Unrecognised format
