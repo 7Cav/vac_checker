@@ -18,4 +18,7 @@
     <phrase title="option.steamCheckerDebugLog" version_id="1000131" version_string="1.0.1"><![CDATA[Enable Debug Logging]]></phrase>
     <phrase title="option_explain.steamCheckerDebugLog" version_id="1000131" version_string="1.0.1"><![CDATA[Logs each step of the VAC check to the server error log. Turn off in production once everything is confirmed working.]]></phrase>
 
+    <phrase title="option.steamCheckerAllowedRoleIds" version_id="1000131" version_string="1.0.1"><![CDATA[!vac Command — Allowed User Group IDs]]></phrase>
+    <phrase title="option_explain.steamCheckerAllowedRoleIds" version_id="1000131" version_string="1.0.1"><![CDATA[User group IDs whose members may invoke the bot by posting <code>!vac &lt;steam_url_or_id&gt;</code> in an enlistment thread. Enter one ID per line or separate with commas (e.g. <code>4, 7</code>). Leave blank to disable the command entirely. Find group IDs under Admin &gt; Users &gt; User Groups.]]></phrase>
+
 </phrases>

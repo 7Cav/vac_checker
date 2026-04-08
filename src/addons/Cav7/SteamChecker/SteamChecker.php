@@ -107,6 +107,54 @@ class SteamChecker
         $this->postReply($this->buildBanReportMessage($steamId64, $banData));
     }
 
+    /**
+     * Manual invocation via the !vac command. Skips first-post extraction and
+     * platform detection; resolves the supplied Steam identifier directly and
+     * posts the standard ban-report reply.
+     */
+    public function runManual(string $rawSteamId): void
+    {
+        $this->debug('SteamChecker::runManual() rawSteamId=' . $rawSteamId);
+
+        if (!$this->apiKey) {
+            \XF::logError('[Cav7/SteamChecker] Steam API key is not configured.');
+            return;
+        }
+
+        if (!$this->botUserId) {
+            \XF::logError('[Cav7/SteamChecker] Bot user ID is not configured.');
+            return;
+        }
+
+        // --- Steam ID resolution --------------------------------------------
+        try {
+            $steamId64 = $this->resolveSteamId($rawSteamId);
+            $this->debug('runManual resolved SteamID64: ' . var_export($steamId64, true));
+        } catch (\Throwable $e) {
+            \XF::logException($e, false, '[Cav7/SteamChecker] !vac Steam ID resolution error: ');
+            $this->postReply($this->buildUnresolvableMessage($rawSteamId));
+            return;
+        }
+
+        if ($steamId64 === null) {
+            $this->postReply($this->buildUnresolvableMessage($rawSteamId));
+            return;
+        }
+
+        // --- Ban data fetch --------------------------------------------------
+        try {
+            $banData = $this->fetchBanData($steamId64);
+            $this->debug('runManual ban data: ' . json_encode($banData));
+        } catch (\Throwable $e) {
+            \XF::logException($e, false, '[Cav7/SteamChecker] !vac Steam API error: ');
+            $this->postReply($this->buildApiErrorMessage($steamId64));
+            return;
+        }
+
+        // --- Post result ----------------------------------------------------
+        $this->postReply($this->buildBanReportMessage($steamId64, $banData));
+    }
+
     // -------------------------------------------------------------------------
     // Post-body parsing
     // -------------------------------------------------------------------------
