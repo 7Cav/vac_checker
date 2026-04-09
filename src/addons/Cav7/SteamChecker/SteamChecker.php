@@ -58,7 +58,10 @@ class SteamChecker
         $this->debug('Post loaded. Message length=' . strlen($message));
 
         // --- Platform check -------------------------------------------------
-        $platform = $this->extractNextLineField($message, 'Platform and Game');
+        // Try the full label (standard enlistment) first; re-enlistment forms use
+        // the shorter label, sometimes with the value inline on the same line.
+        $platform = $this->extractNextLineField($message, 'Platform and Game Selection')
+                 ?? $this->extractNextLineField($message, 'Platform and Game');
         $this->debug('Platform extracted: ' . var_export($platform, true));
 
         if ($platform === null || stripos(trim($platform), 'PC') !== 0) {
