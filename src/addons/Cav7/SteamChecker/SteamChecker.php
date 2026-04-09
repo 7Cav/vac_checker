@@ -58,7 +58,7 @@ class SteamChecker
         $this->debug('Post loaded. Message length=' . strlen($message));
 
         // --- Platform check -------------------------------------------------
-        $platform = $this->extractNextLineField($message, 'Platform and Game Selection');
+        $platform = $this->extractNextLineField($message, 'Platform and Game');
         $this->debug('Platform extracted: ' . var_export($platform, true));
 
         if ($platform === null || stripos(trim($platform), 'PC') !== 0) {
@@ -160,14 +160,14 @@ class SteamChecker
     // -------------------------------------------------------------------------
 
     /**
-     * Finds a BBCode label line and returns the text on the first non-empty
-     * line that follows it. Returns null if the label is not found.
+     * Finds a BBCode label line and returns the associated value.
      *
-     * Handles both inline-value fields ("Label:[/B] Value on same line") and
-     * next-line fields ("[B]Label[/B]\nValue on next line"). For the labels we
-     * care about (Platform, SteamID) the value is always on the next line, so
-     * we strip BBCode from each line and look for a line whose plain text
-     * contains the label string, then return the next non-empty line.
+     * Handles two formats:
+     *   Inline:    "Label  Value on same line"  (re-enlistment forms)
+     *   Next-line: "[B]Label[/B]\nValue"        (standard enlistment forms)
+     *
+     * Strips BBCode tags from each line before comparing. Returns null if the
+     * label is not found.
      */
     protected function extractNextLineField(string $message, string $fieldLabel): ?string
     {
@@ -176,12 +176,22 @@ class SteamChecker
 
         for ($i = 0; $i < $count; $i++) {
             $plain = $this->stripBbCode($lines[$i]);
-            if (stripos($plain, $fieldLabel) !== false) {
-                for ($j = $i + 1; $j < $count; $j++) {
-                    $value = trim($lines[$j]);
-                    if ($value !== '') {
-                        return $this->stripBbCode($value);
-                    }
+            $pos   = stripos($plain, $fieldLabel);
+            if ($pos === false) {
+                continue;
+            }
+
+            // Inline value: text remaining on the same line after the label.
+            $inline = trim(substr($plain, $pos + strlen($fieldLabel)));
+            if ($inline !== '') {
+                return $inline;
+            }
+
+            // Next-line value: first non-empty line that follows.
+            for ($j = $i + 1; $j < $count; $j++) {
+                $value = trim($lines[$j]);
+                if ($value !== '') {
+                    return $this->stripBbCode($value);
                 }
             }
         }
