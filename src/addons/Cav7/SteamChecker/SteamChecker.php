@@ -501,21 +501,36 @@ class SteamChecker
         $this->debug('Bot user found: ' . $botUser->username . '. Saving post entity directly.');
 
         // XF 2.3 removed XF\Service\Post\Creator entirely. Create the Post
-        // entity directly — the entity's own _postSave() handles updating
-        // the thread's reply count and last-post metadata.
+        // entity directly. Note: the direct save bypasses XF's service layer,
+        // so thread counters (reply_count, last_post_id, last_post_date) must
+        // be updated manually afterwards.
         /** @var \XF\Entity\Post $post */
         $post = \XF::em()->create('XF:Post');
-        $post->thread_id  = $this->thread->thread_id;
-        $post->user_id    = $botUser->user_id;
-        $post->username   = $botUser->username;
-        $post->post_date  = \XF::$time;
-        $post->message    = $message;
+        $post->thread_id     = $this->thread->thread_id;
+        $post->user_id       = $botUser->user_id;
+        $post->username      = $botUser->username;
+        $post->post_date     = \XF::$time;
+        $post->message       = $message;
         $post->message_state = 'visible';
-        $post->ip_id      = 0;
-        $post->position   = $this->thread->reply_count + 1;
+        $post->ip_id         = 0;
+        $post->position      = $this->thread->reply_count + 1;
 
         $post->save();
-
         $this->debug('Post saved. post_id=' . $post->post_id);
+
+        // Atomically sync the thread row. reply_count is incremented rather
+        // than recalculated so concurrent saves don't collide. Updating
+        // last_post_id/date fixes the thread-list hover showing the bot reply
+        // instead of the OP (XF uses first_post_id for the card, but a stale
+        // last_post_id causes an inconsistent state in the thread meta cache).
+        \XF::db()->query('
+            UPDATE xf_thread
+            SET reply_count  = reply_count + 1,
+                last_post_id   = ?,
+                last_post_date = ?
+            WHERE thread_id = ?
+        ', [$post->post_id, $post->post_date, $this->thread->thread_id]);
+
+        $this->debug('Thread counters updated.');
     }
 }
