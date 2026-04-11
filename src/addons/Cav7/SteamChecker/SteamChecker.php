@@ -501,9 +501,8 @@ class SteamChecker
         $this->debug('Bot user found: ' . $botUser->username . '. Saving post entity directly.');
 
         // XF 2.3 removed XF\Service\Post\Creator entirely. Create the Post
-        // entity directly. Note: the direct save bypasses XF's service layer,
-        // so thread counters (reply_count, last_post_id, last_post_date) must
-        // be updated manually afterwards.
+        // entity directly. XF's own Post._postSave() hooks handle updating
+        // the thread's reply_count, last_post_id, and last_post_date.
         /** @var \XF\Entity\Post $post */
         $post = \XF::em()->create('XF:Post');
         $post->thread_id     = $this->thread->thread_id;
@@ -517,20 +516,5 @@ class SteamChecker
 
         $post->save();
         $this->debug('Post saved. post_id=' . $post->post_id);
-
-        // Atomically sync the thread row. reply_count is incremented rather
-        // than recalculated so concurrent saves don't collide. Updating
-        // last_post_id/date fixes the thread-list hover showing the bot reply
-        // instead of the OP (XF uses first_post_id for the card, but a stale
-        // last_post_id causes an inconsistent state in the thread meta cache).
-        \XF::db()->query('
-            UPDATE xf_thread
-            SET reply_count  = reply_count + 1,
-                last_post_id   = ?,
-                last_post_date = ?
-            WHERE thread_id = ?
-        ', [$post->post_id, $post->post_date, $this->thread->thread_id]);
-
-        $this->debug('Thread counters updated.');
     }
 }
