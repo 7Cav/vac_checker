@@ -185,8 +185,11 @@ class SteamChecker
             }
 
             // Inline value: text remaining on the same line after the label.
+            // Ignore if it starts with "or " — that means the form appended
+            // extra options to the label (e.g. "...URL/Link or EA Nick Name")
+            // and the actual value is on the next line.
             $inline = trim(substr($plain, $pos + strlen($fieldLabel)));
-            if ($inline !== '') {
+            if ($inline !== '' && stripos($inline, 'or ') !== 0) {
                 return $inline;
             }
 
