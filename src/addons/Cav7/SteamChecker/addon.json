@@ -1,8 +1,8 @@
 {
     "title": "Steam VAC Checker",
     "description": "Automatically checks Steam VAC/Game bans when enlistment applications are submitted in the configured forum node.",
-    "version_string": "1.1.0",
-    "version_id": 1010031,
+    "version_string": "1.1.2",
+    "version_id": 1010231,
     "dev": "Cav7",
     "dev_url": "",
     "faq_url": "",

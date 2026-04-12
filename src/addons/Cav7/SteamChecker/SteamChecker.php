@@ -185,8 +185,11 @@ class SteamChecker
             }
 
             // Inline value: text remaining on the same line after the label.
+            // Ignore if it starts with "or " — that means the form appended
+            // extra options to the label (e.g. "...URL/Link or EA Nick Name")
+            // and the actual value is on the next line.
             $inline = trim(substr($plain, $pos + strlen($fieldLabel)));
-            if ($inline !== '') {
+            if ($inline !== '' && stripos($inline, 'or ') !== 0) {
                 return $inline;
             }
 
@@ -501,21 +504,36 @@ class SteamChecker
         $this->debug('Bot user found: ' . $botUser->username . '. Saving post entity directly.');
 
         // XF 2.3 removed XF\Service\Post\Creator entirely. Create the Post
-        // entity directly — the entity's own _postSave() handles updating
-        // the thread's reply count and last-post metadata.
+        // entity directly. XF's own Post._postSave() hooks handle updating
+        // the thread's reply_count, last_post_id, and last_post_date.
         /** @var \XF\Entity\Post $post */
         $post = \XF::em()->create('XF:Post');
-        $post->thread_id  = $this->thread->thread_id;
-        $post->user_id    = $botUser->user_id;
-        $post->username   = $botUser->username;
-        $post->post_date  = \XF::$time;
-        $post->message    = $message;
+        $post->thread_id     = $this->thread->thread_id;
+        $post->user_id       = $botUser->user_id;
+        $post->username      = $botUser->username;
+        $post->post_date     = \XF::$time;
+        $post->message       = $message;
         $post->message_state = 'visible';
-        $post->ip_id      = 0;
-        $post->position   = $this->thread->reply_count + 1;
+        $post->ip_id         = 0;
+        $post->position      = $this->thread->reply_count + 1;
 
         $post->save();
-
         $this->debug('Post saved. post_id=' . $post->post_id);
+
+        // XF's entity manager may hold a stale Thread with first_post_id = 0
+        // (captured before the OP was persisted). When XF's post-save hooks
+        // flush that cached entity back to the DB, the bot post ends up as
+        // first_post_id, breaking the thread-list hover card. Fix it explicitly.
+        $opPostId = (int) \XF::db()->fetchOne(
+            'SELECT post_id FROM xf_post WHERE thread_id = ? AND position = 0 LIMIT 1',
+            [$this->thread->thread_id]
+        );
+        if ($opPostId) {
+            \XF::db()->query(
+                'UPDATE xf_thread SET first_post_id = ? WHERE thread_id = ?',
+                [$opPostId, $this->thread->thread_id]
+            );
+            $this->debug('first_post_id corrected to op post_id=' . $opPostId);
+        }
     }
 }

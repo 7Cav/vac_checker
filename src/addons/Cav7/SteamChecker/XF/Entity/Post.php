@@ -29,6 +29,26 @@ class Post extends XFCP_Post
             return;
         }
 
+        // --- Automatic check (OP) -------------------------------------------
+        // position 0 = first post of the thread. Hooking here instead of
+        // Thread._postSave() ensures the OP is already in the database when
+        // the bot posts, so XF correctly assigns first_post_id to the OP
+        // rather than the bot reply.
+        if ($this->position === 0) {
+            if (\XF::options()->steamCheckerDebugLog) {
+                \XF::logError('[VAC-DEBUG] Post._postSave: OP detected for thread_id='
+                    . $thread->thread_id);
+            }
+            try {
+                $checker = new \Cav7\SteamChecker\SteamChecker($thread);
+                $checker->run();
+            } catch (\Throwable $e) {
+                \XF::logException($e, false, '[Cav7/SteamChecker] Unhandled error: ');
+            }
+            return;
+        }
+
+        // --- !vac command (replies) ------------------------------------------
         // Parse allowed role IDs from the option (comma- or newline-separated).
         $rawRoles = trim((string) \XF::options()->steamCheckerAllowedRoleIds);
         if ($rawRoles === '') {
