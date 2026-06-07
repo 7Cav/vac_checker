@@ -180,6 +180,10 @@ namespace {
         return \Cav7\SteamChecker\SteamChecker::$runManualCalls;
     };
 
+    $logsClean = function (): bool {
+        return \XF::$loggedErrors === [] && \XF::$loggedExceptions === [];
+    };
+
     $realId = '76561198000000001';
     $nbsp   = "\u{00A0}"; // U+00A0 NO-BREAK SPACE (UTF-8: C2 A0)
 
@@ -195,6 +199,7 @@ namespace {
         count($manuals()) === 1);
     $check('repro (#20a): check runs against the typed id',
         $manuals() === [$realId]);
+    $check('repro (#20a): logs stay clean', $logsClean());
 
     // -----------------------------------------------------------------------
     // AC (#20b): entity-encoded NBSP — `&nbsp;` decodes to U+00A0 inside the
@@ -208,6 +213,24 @@ namespace {
         count($manuals()) === 1);
     $check('repro (#20b): check runs against the typed id',
         $manuals() === [$realId]);
+    $check('repro (#20b): logs stay clean', $logsClean());
+
+    // -----------------------------------------------------------------------
+    // NBSP entity siblings (#20c): the numeric ('&#160;', '&#xA0;') and
+    // named ('&NonBreakingSpace;') forms all decode to U+00A0 and must
+    // behave exactly like '&nbsp;'. Kill power: a future "simplify to
+    // str_replace('&nbsp;', …)" would pass every other check here while
+    // re-dropping these forms.
+    // -----------------------------------------------------------------------
+    foreach (['&#160;', '&#xA0;', '&NonBreakingSpace;'] as $entity) {
+        $resetOptions();
+        $post = $makePost(['message' => '!vac' . $entity . $realId]);
+        $invoke($post);
+        $check('NBSP sibling (#20c) "!vac' . $entity . 'id": exactly one check fires with the bare id',
+            $manuals() === [$realId]);
+        $check('NBSP sibling (#20c) "' . $entity . '": logs stay clean',
+            $logsClean());
+    }
 
     // -----------------------------------------------------------------------
     // AC (#21a): entity-encoded brackets are neutralized to whitespace —
@@ -224,6 +247,7 @@ namespace {
         count($manuals()) === 1);
     $check('repro (#21a): captured token is the BARE id (no angle brackets)',
         $manuals() === [$realId]);
+    $check('repro (#21a): logs stay clean', $logsClean());
 
     // -----------------------------------------------------------------------
     // AC (#21b): numeric-entity brackets ('&#60;'/'&#62;') get the same
@@ -234,19 +258,22 @@ namespace {
     $invoke($post);
     $check('repro (#21b) "!vac &#60;id&#62;": captured token is the BARE id',
         $manuals() === [$realId]);
+    $check('repro (#21b): logs stay clean', $logsClean());
 
     // -----------------------------------------------------------------------
-    // Decode-order pin: a single-pass html_entity_decode cannot mint new
-    // entities — '&amp;lt;' decodes to the literal TEXT '&lt;', not a
-    // bracket, so the literal text survives in the token and the
-    // neutralization correctly leaves it alone. Guards against a future
-    // "decode harder" change silently widening the neutralization.
+    // Decode-order pin: a single-pass html_entity_decode never decodes
+    // recursively — '&amp;lt;' yields the literal TEXT '&lt;', not a
+    // bracket — and the pipeline decodes exactly once, so the literal text
+    // survives in the token and the neutralization correctly leaves it
+    // alone. Guards against a future "decode harder" change silently
+    // widening the neutralization.
     // -----------------------------------------------------------------------
     $resetOptions();
     $post = $makePost(['message' => '!vac &amp;lt;' . $realId]);
     $invoke($post);
     $check('decode-order pin: "&amp;lt;" yields the literal text "&lt;" glued to the token',
         $manuals() === ['&lt;' . $realId]);
+    $check('decode-order pin: logs stay clean', $logsClean());
 
     // -----------------------------------------------------------------------
     // Regression (#17 contract preserved): plain-space command and literal
@@ -257,12 +284,46 @@ namespace {
     $invoke($post);
     $check('regression: plain "!vac id" still fires with the id',
         $manuals() === [$realId]);
+    $check('regression plain: logs stay clean', $logsClean());
 
     $resetOptions();
     $post = $makePost(['message' => '!vac <' . $realId . '>']);
     $invoke($post);
     $check('regression: literal "!vac <id>" still captures the BARE id',
         $manuals() === [$realId]);
+    $check('regression literal brackets: logs stay clean', $logsClean());
+
+    // -----------------------------------------------------------------------
+    // Degenerate-argument characterization: an argument made ONLY of entity
+    // brackets/NBSP dissolves to whitespace under the post-decode
+    // neutralization, so the command goes unmatched — NO check fires and NO
+    // reply is sent. Deliberate, characterized contract: consistent with
+    // literal '!vac <>' (known-silent since #17). A follow-up issue tracks
+    // possibly replying with the re-run instruction instead.
+    // -----------------------------------------------------------------------
+    foreach (['!vac &lt;&gt;', '!vac &nbsp;'] as $degenerate) {
+        $resetOptions();
+        $post = $makePost(['message' => $degenerate]);
+        $invoke($post);
+        $check('degenerate "' . $degenerate . '": no check fires and no reply is sent',
+            $manuals() === []
+            && \Cav7\SteamChecker\SteamChecker::$constructed === []);
+    }
+
+    // -----------------------------------------------------------------------
+    // NBSP-inside-token characterization: U+00A0 in the middle of an id is
+    // neutralized to a space like any other, so the token SPLITS there and
+    // the check fires with the truncated prefix — runManual('7656119') —
+    // which downstream resolveSteamId() rejects loudly. Chosen behavior,
+    // not accidental: pinned so the truncation stays a visible contract.
+    // -----------------------------------------------------------------------
+    $resetOptions();
+    $post = $makePost(['message' => '!vac 7656119' . $nbsp . '8000000001']);
+    $invoke($post);
+    $check('NBSP inside token: check fires with the truncated token "7656119"',
+        $manuals() === ['7656119']);
+    $check('NBSP inside token: logs stay clean (rejection happens downstream)',
+        $logsClean());
 
     // -----------------------------------------------------------------------
     // Silent-failure audit (#20): the pre-fix NBSP no-match produced no

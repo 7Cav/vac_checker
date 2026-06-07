@@ -150,9 +150,13 @@ class Post extends XFCP_Post
         // (issue #21), and '&nbsp;' — like a raw U+00A0 pasted from rendered
         // HTML — becomes a plain space the ASCII-only \s in the final match
         // can see (issue #20). Safe order: a single-pass html_entity_decode
-        // cannot mint new entities ('&amp;lt;' decodes to the literal text
-        // '&lt;', not a bracket). Plain str_replace — no PCRE, so no new
-        // fail-open surface; neutralized text can never prevent a !vac match.
+        // never decodes recursively — '&amp;lt;' yields the literal text
+        // '&lt;', not a bracket — and this pipeline decodes exactly once.
+        // Plain str_replace — no PCRE, so no new fail-open surface. Residual:
+        // an argument made ONLY of brackets/NBSP ('!vac &lt;&gt;',
+        // '!vac &nbsp;') dissolves to whitespace, so the command goes
+        // unmatched silently — the same known-silent contract literal
+        // '!vac <>' has had since #17.
         $plain = str_replace(['<', '>', "\u{00A0}"], ' ', html_entity_decode($bbStripped, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
 
         // Final match: the fourth PCRE step, carrying the same fail-open
