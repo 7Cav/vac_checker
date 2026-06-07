@@ -19,7 +19,8 @@ one.
 
 The failure mode this would have papered over is already handled by the
 human-in-the-loop path: the bot's failure replies instruct staff how to re-run
-the check with `!vac <Steam64ID or profile URL>` (#7), so staff can grab the
+the check with `!vac your Steam64ID or profile URL` (#7, wording updated by
+#17), so staff can grab the
 correct ID from the applicant and re-run with an unambiguous identifier.
 Explicit re-run with a verified ID beats implicit resolution with a guessed
 one.

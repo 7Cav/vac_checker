@@ -83,14 +83,16 @@ class Post extends XFCP_Post
         // silently dropping the command. The body uses unrolled possessive
         // quantifiers ((?:[^\[]++|\[(?!…))*+) which make backtracking exhaustion
         // vastly harder, but cannot rule it out — a large enough bracket-bomb can
-        // still hit pcre.backtrack_limit. Each of the four PCRE steps below (this
-        // quote strip, the [URL] unwrap, the BBCode strip, and the final !vac
-        // match) fails open with a logged error on PCRE failure. The only
-        // non-PCRE transforms in the pipeline — the str_replace angle-bracket
-        // neutralization and the entity decode below — cannot fail, so the
-        // fail-open guarantee covers the whole pipeline (issue #17 removed the
-        // strip_tags() call that could silently drop a command containing an
-        // unterminated '<…>').
+        // still hit pcre.backtrack_limit. On PCRE failure, the three strips
+        // below (this quote strip, the [URL] unwrap, the BBCode strip) fail
+        // open with a logged error: each falls back to its input, so the
+        // command is preserved. The final !vac match instead fails noisy: a
+        // PCRE failure there is logged and treated as "no command" (command
+        // dropped, loudly). The only non-PCRE transforms in the pipeline — the
+        // str_replace angle-bracket neutralization and the entity decode below
+        // — cannot fail, so every step now either cannot fail or fails loudly
+        // (issue #17 removed the strip_tags() call that could silently drop a
+        // command preceded by, containing, or wrapped in a '<…>' pseudo-tag).
         $message = $this->message;
         $strippedBlocks = 0;
         do {
@@ -137,8 +139,9 @@ class Post extends XFCP_Post
         }
         // Neutralize literal '<' and '>' by replacing each with a single space
         // (issue #17). XF messages are BBCode, not HTML, so there are no real
-        // tags to strip here; the old strip_tags() call deleted everything from
-        // an unterminated '<' to the next '>' or end-of-string, silently
+        // tags to strip here; under the old strip_tags() call, any '<' followed
+        // by a non-whitespace character opened a pseudo-tag deleted through the
+        // next '>', or to end-of-string when unterminated, silently
         // swallowing valid commands ('aww <3 !vac …', '!vac <id>' typed per the
         // bot's own old instruction). Plain str_replace — no PCRE, so no new
         // fail-open surface; neutralized text can never prevent a !vac match.

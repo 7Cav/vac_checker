@@ -177,11 +177,11 @@ namespace {
     // -----------------------------------------------------------------------
     // AC1: each formerly-swallowed repro input fires exactly one manual check
     // with the correct identifier. Pre-fix, strip_tags() ate from the
-    // unterminated '<' to the next '>' or EOL and the command vanished
-    // silently (no check, no log).
+    // unterminated '<' to the next '>' or end-of-string and the command
+    // vanished silently (no check, no log).
     // -----------------------------------------------------------------------
 
-    // (a) '<3' heart in chat: strip_tags ate '<3 !vac …' to EOL.
+    // (a) '<3' heart in chat: strip_tags ate '<3 !vac …' to end-of-string.
     $resetOptions();
     $post = $makePost(['message' => 'aww <3 !vac ' . $realId]);
     $invoke($post);
@@ -190,7 +190,7 @@ namespace {
     $check('repro (a): check runs against the typed id',
         $manuals() === [$realId]);
 
-    // (b) bare less-than in prose: strip_tags ate '<b do !vac …' to EOL.
+    // (b) bare less-than in prose: strip_tags ate '<b do !vac …' to end-of-string.
     $resetOptions();
     $post = $makePost(['message' => 'if a<b do !vac ' . $realId]);
     $invoke($post);
@@ -250,9 +250,10 @@ namespace {
         $manuals() === [$realId]);
 
     // -----------------------------------------------------------------------
-    // AC4: angle brackets never act as token separators retroactively — a
-    // command whose argument abuts a '<' captures only up to the bracket.
-    // '!vac<id>' (no space) gains its separator from the neutralized '<'.
+    // AC4: angle brackets act as token separators, never as token characters
+    // — a neutralized '<' supplies the whitespace between '!vac' and its
+    // argument in '!vac<id>' (no space), and would likewise cut an argument
+    // at the bracket.
     // -----------------------------------------------------------------------
     $resetOptions();
     $post = $makePost(['message' => '!vac<' . $realId . '>']);
