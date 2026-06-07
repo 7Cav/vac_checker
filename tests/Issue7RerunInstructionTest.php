@@ -230,6 +230,7 @@ namespace {
     $expectedBanned = implode("\n", [
         '[B]Steam VAC Check[/B]',
         'SteamID: 76561197960287930',
+        'Profile Name: (unknown)', // null persona name (issue #6) — builder called without a fetch
         'VAC Bans: 2',
         'Game Bans: 1',
         'Days Since Last Ban: 30',
@@ -250,6 +251,7 @@ namespace {
     $expectedClean = implode("\n", [
         '[B]Steam VAC Check[/B]',
         'SteamID: 76561197960287930',
+        'Profile Name: (unknown)', // null persona name (issue #6) — builder called without a fetch
         'VAC Bans: 0',
         'Game Bans: 0',
         'Community Banned: No',
