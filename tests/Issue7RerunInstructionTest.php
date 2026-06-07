@@ -232,7 +232,7 @@ namespace {
         if ($bbStripped === null) {
             $bbStripped = $plain; // fail open per documented contract
         }
-        $plain = html_entity_decode(str_replace(['<', '>'], ' ', $bbStripped), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $plain = str_replace(['<', '>', "\u{00A0}"], ' ', html_entity_decode($bbStripped, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
 
         if (!preg_match('/!vac\s+(\S+)/i', $plain, $m)) {
             return null;
