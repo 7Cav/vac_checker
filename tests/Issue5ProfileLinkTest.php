@@ -421,6 +421,25 @@ namespace Issue5Tests {
         'posted: ' . var_export($checker->posted, true)
     );
 
+    // --- Vanity-resolver defense-in-depth ------------------------------------
+    // ResolveVanityURL returns success but a malformed/malicious steamid. The
+    // resolver must treat it as not-found: unresolvable reply, and the injected
+    // markup never appears anywhere in the posted message.
+    $checker = makeChecker();
+    $checker->httpResponses = [
+        'ResolveVanityURL' => json_encode([
+            'response' => ['success' => 1, 'steamid' => 'x"][B]fake[/B]'],
+        ]),
+    ];
+    $checker->runManual('https://steamcommunity.com/id/someuser');
+    check(
+        'malicious vanity steamid is treated as not-found (unresolvable reply, no injected markup)',
+        count($checker->posted) === 1
+            && strpos($checker->posted[0], 'Could not determine a valid Steam ID') !== false
+            && strpos($checker->posted[0], '[B]fake') === false,
+        'posted: ' . var_export($checker->posted, true)
+    );
+
     // --- Summary -------------------------------------------------------------
     if ($failures > 0) {
         echo "\n$failures test(s) FAILED\n";

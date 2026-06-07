@@ -290,7 +290,8 @@ class SteamChecker
 
     /**
      * Calls the Steam ResolveVanityURL API and returns the SteamID64, or null
-     * if the vanity name is not found.
+     * if the vanity name is not found — or if the API returns anything other
+     * than a well-formed 17-digit SteamID64.
      *
      * @throws \RuntimeException on HTTP or API failure
      */
@@ -315,7 +316,14 @@ class SteamChecker
             return null;
         }
 
-        return $data['response']['steamid'] ?? null;
+        $steamId = $data['response']['steamid'] ?? null;
+
+        // Defense-in-depth: only ever return a well-formed SteamID64 — this
+        // value flows into BBCode replies and must never carry arbitrary API
+        // content. Anything else is treated as not-found.
+        return (is_string($steamId) && preg_match('/^\d{17}$/', $steamId))
+            ? $steamId
+            : null;
     }
 
     /**
