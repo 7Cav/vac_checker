@@ -474,6 +474,7 @@ class SteamChecker
             '[B]Steam VAC Check[/B]',
             '[COLOR=rgb(184, 49, 47)][B]⚠️ Could not determine a valid Steam ID from the application. Manual check required.[/B][/COLOR]',
             'Raw value: ' . $rawValue,
+            $this->buildRerunInstructionLine(),
         ]);
     }
 
@@ -483,7 +484,18 @@ class SteamChecker
             '[B]Steam VAC Check[/B]',
             'SteamID: ' . $steamId64,
             '[COLOR=rgb(184, 49, 47)][B]⚠️ Steam API error — could not complete the ban check. Manual check required.[/B][/COLOR]',
+            $this->buildRerunInstructionLine(),
         ]);
+    }
+
+    /**
+     * One-line staff instruction appended to failure replies, telling staff
+     * how to re-run the check via the !vac command. Deliberately contains no
+     * valid-looking SteamID64 so a quoted copy can't resolve to a real account.
+     */
+    protected function buildRerunInstructionLine(): string
+    {
+        return '[I]Staff can re-run this check by replying in this thread with [ICODE]!vac <Steam64ID or profile URL>[/ICODE].[/I]';
     }
 
     // -------------------------------------------------------------------------
