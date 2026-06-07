@@ -529,7 +529,7 @@ class SteamChecker
 
         $lines = [
             '[B]Steam VAC Check[/B]',
-            'SteamID: ' . $steamId64,
+            'SteamID: ' . $this->buildSteamIdLink($steamId64),
             'Profile Name: ' . $nameLine,
             'VAC Bans: ' . $vacBans,
             'Game Bans: ' . $gameBans,
@@ -551,6 +551,18 @@ class SteamChecker
         return implode("\n", $lines);
     }
 
+    /**
+     * Renders a resolved SteamID64 as a clickable BBCode link to its Steam
+     * community profile. Visible link text is the bare ID — staff still read
+     * and copy it; only the markup around it changes. The URL is derived
+     * directly from the ID, no extra Steam API call.
+     */
+    protected function buildSteamIdLink(string $steamId64): string
+    {
+        return '[URL="https://steamcommunity.com/profiles/' . $steamId64 . '"]'
+            . $steamId64 . '[/URL]';
+    }
+
     protected function buildUnresolvableMessage(string $rawValue): string
     {
         return implode("\n", [
@@ -565,7 +577,7 @@ class SteamChecker
     {
         return implode("\n", [
             '[B]Steam VAC Check[/B]',
-            'SteamID: ' . $steamId64,
+            'SteamID: ' . $this->buildSteamIdLink($steamId64),
             '[COLOR=rgb(184, 49, 47)][B]⚠️ Steam API error — could not complete the ban check. Manual check required.[/B][/COLOR]',
             $this->buildRerunInstructionLine(),
         ]);
