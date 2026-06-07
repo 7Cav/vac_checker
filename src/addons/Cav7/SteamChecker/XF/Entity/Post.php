@@ -89,7 +89,7 @@ class Post extends XFCP_Post
         // command is preserved. The final !vac match instead fails noisy: a
         // PCRE failure there is logged and treated as "no command" (command
         // dropped, loudly). The only non-PCRE transforms in the pipeline — the
-        // str_replace angle-bracket neutralization and the entity decode below
+        // entity decode and the str_replace neutralization below
         // — cannot fail, so every step now either cannot fail or fails loudly
         // (issue #17 removed the strip_tags() call that could silently drop a
         // command preceded by, containing, or wrapped in a '<…>' pseudo-tag).
@@ -137,16 +137,27 @@ class Post extends XFCP_Post
                 . '; using message as-is.');
             $bbStripped = $plain; // fail open per documented contract
         }
-        // Neutralize literal '<' and '>' by replacing each with a single space
-        // (issue #17). XF messages are BBCode, not HTML, so there are no real
-        // tags to strip here; under the old strip_tags() call, any '<' followed
-        // by a non-whitespace character opened a pseudo-tag deleted through the
+        // Decode entities, then neutralize '<', '>' and U+00A0 NO-BREAK SPACE
+        // by replacing each with a single space (issues #17, #20, #21). XF
+        // messages are BBCode, not HTML, so there are no real tags to strip
+        // here; under the old strip_tags() call, any '<' followed by a
+        // non-whitespace character opened a pseudo-tag deleted through the
         // next '>', or to end-of-string when unterminated, silently
-        // swallowing valid commands ('aww <3 !vac …', '!vac <id>' typed per the
-        // bot's own old instruction). Plain str_replace — no PCRE, so no new
-        // fail-open surface; neutralized text can never prevent a !vac match.
-        // The entity decode stays unchanged.
-        $plain = html_entity_decode(str_replace(['<', '>'], ' ', $bbStripped), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        // swallowing valid commands ('aww <3 !vac …', '!vac <id>' typed per
+        // the bot's own old instruction). Neutralization runs AFTER the decode
+        // so entity-encoded brackets ('&lt;', '&#60;', …) become whitespace
+        // like literal ones instead of reappearing in the captured token
+        // (issue #21), and '&nbsp;' — like a raw U+00A0 pasted from rendered
+        // HTML — becomes a plain space the ASCII-only \s in the final match
+        // can see (issue #20). Safe order: a single-pass html_entity_decode
+        // never decodes recursively — '&amp;lt;' yields the literal text
+        // '&lt;', not a bracket — and this pipeline decodes exactly once.
+        // Plain str_replace — no PCRE, so no new fail-open surface. Residual:
+        // an argument made ONLY of brackets/NBSP ('!vac &lt;&gt;',
+        // '!vac &nbsp;') dissolves to whitespace, so the command goes
+        // unmatched silently — the same known-silent contract literal
+        // '!vac <>' has had since #17.
+        $plain = str_replace(['<', '>', "\u{00A0}"], ' ', html_entity_decode($bbStripped, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
 
         // Final match: the fourth PCRE step, carrying the same fail-open
         // observability as the three strips above. preg_match() returns false on
