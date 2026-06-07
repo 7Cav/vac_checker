@@ -105,7 +105,7 @@ class SteamChecker
             return;
         }
 
-        // --- Persona name fetch (best effort — never blocks the report) ------
+        // --- Persona name fetch (best effort) --------------------------------
         try {
             $personaName = $this->fetchPlayerSummary($steamId64);
             $this->debug('Persona name fetched: ' . var_export($personaName, true));
@@ -163,7 +163,7 @@ class SteamChecker
             return;
         }
 
-        // --- Persona name fetch (best effort — never blocks the report) ------
+        // --- Persona name fetch (best effort) --------------------------------
         try {
             $personaName = $this->fetchPlayerSummary($steamId64);
             $this->debug('runManual persona name: ' . var_export($personaName, true));
@@ -412,8 +412,12 @@ class SteamChecker
 
     /**
      * Calls the Steam GetPlayerSummaries API and returns the player's current
-     * persona (profile) name, or null if it cannot be fetched. Never throws —
-     * the persona name is decorative and must not block the ban report.
+     * persona (profile) name, or null if it cannot be fetched. All failure
+     * modes (HTTP failure, malformed JSON, missing fields) return null rather
+     * than throwing and are logged via \XF::logError — the persona name is
+     * decorative and must not block the ban report. Callers still wrap this
+     * in try/catch as defence-in-depth (overrides or logging failures could
+     * still throw).
      */
     protected function fetchPlayerSummary(string $steamId64): ?string
     {
@@ -423,14 +427,20 @@ class SteamChecker
 
         $body = $this->httpGet($url);
         if ($body === null) {
-            $this->debug('GetPlayerSummaries request failed for SteamID: ' . $steamId64);
+            \XF::logError('[Cav7/SteamChecker] GetPlayerSummaries request failed (network) for SteamID: ' . $steamId64);
             return null;
         }
 
         $data = json_decode($body, true);
+        if (!is_array($data) || !isset($data['response'])) {
+            \XF::logError('[Cav7/SteamChecker] Unexpected GetPlayerSummaries response for SteamID ' . $steamId64 . ' (len=' . strlen($body) . '): ' . substr($body, 0, 200));
+            return null;
+        }
+
         $name = $data['response']['players'][0]['personaname'] ?? null;
-        if (!is_string($name) || $name === '') {
-            $this->debug('GetPlayerSummaries returned no persona name for SteamID: ' . $steamId64);
+        $name = is_string($name) ? trim($name) : '';
+        if ($name === '') {
+            \XF::logError('[Cav7/SteamChecker] GetPlayerSummaries returned no persona name for SteamID: ' . $steamId64);
             return null;
         }
 

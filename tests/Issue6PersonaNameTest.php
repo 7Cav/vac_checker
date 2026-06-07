@@ -143,6 +143,12 @@ namespace Issue6Tests {
         return new Issue6TestableChecker(new \XF\Entity\Thread());
     }
 
+    function resetLogs(): void
+    {
+        \XF::$loggedErrors = [];
+        \XF::$loggedExceptions = [];
+    }
+
     const STEAM_ID = '76561198000000001';
     const CLEAN_BAN_DATA = [
         'NumberOfVACBans'  => 0,
@@ -335,6 +341,7 @@ namespace Issue6Tests {
         $checker->callFetchPlayerSummary(STEAM_ID) === 'GamerDude'
     );
 
+    resetLogs();
     $checker = makeChecker();
     $checker->httpResponses = []; // httpGet returns null -> HTTP failure
     $result = 'not-run';
@@ -348,7 +355,16 @@ namespace Issue6Tests {
         $result === null,
         var_export($result, true)
     );
+    $networkError = \XF::$loggedErrors[0] ?? null;
+    check(
+        'HTTP failure logs exactly one error naming the network failure',
+        count(\XF::$loggedErrors) === 1
+            && strpos($networkError, 'request failed (network)') !== false
+            && strpos($networkError, STEAM_ID) !== false,
+        'loggedErrors: ' . var_export(\XF::$loggedErrors, true)
+    );
 
+    resetLogs();
     $checker = makeChecker();
     $checker->httpResponses = ['GetPlayerSummaries' => 'this is not json'];
     $result = 'not-run';
@@ -362,7 +378,18 @@ namespace Issue6Tests {
         $result === null,
         var_export($result, true)
     );
+    $unexpectedError = \XF::$loggedErrors[0] ?? null;
+    check(
+        'malformed body logs exactly one error with body length and snippet',
+        count(\XF::$loggedErrors) === 1
+            && strpos($unexpectedError, 'Unexpected GetPlayerSummaries response') !== false
+            && strpos($unexpectedError, STEAM_ID) !== false
+            && strpos($unexpectedError, '(len=16)') !== false
+            && strpos($unexpectedError, 'this is not json') !== false,
+        'loggedErrors: ' . var_export(\XF::$loggedErrors, true)
+    );
 
+    resetLogs();
     $checker = makeChecker();
     $checker->httpResponses = ['GetPlayerSummaries' => json_encode(['response' => ['players' => []]])];
     $result = 'not-run';
@@ -376,6 +403,61 @@ namespace Issue6Tests {
         $result === null,
         var_export($result, true)
     );
+    $noNameError = \XF::$loggedErrors[0] ?? null;
+    check(
+        'empty players logs exactly one no-persona-name error',
+        count(\XF::$loggedErrors) === 1
+            && strpos($noNameError, 'returned no persona name') !== false
+            && strpos($noNameError, STEAM_ID) !== false,
+        'loggedErrors: ' . var_export(\XF::$loggedErrors, true)
+    );
+
+    check(
+        'the three degraded-path log messages are distinguishable',
+        $networkError !== null && $unexpectedError !== null && $noNameError !== null
+            && $networkError !== $unexpectedError
+            && $networkError !== $noNameError
+            && $unexpectedError !== $noNameError,
+        var_export([$networkError, $unexpectedError, $noNameError], true)
+    );
+
+    // --- Test 4b: degraded persona payloads all yield null --------------------
+    $degradedPayloads = [
+        'JSON-null personaname' => json_encode(
+            ['response' => ['players' => [['steamid' => STEAM_ID, 'personaname' => null]]]]
+        ),
+        'missing personaname'   => json_encode(
+            ['response' => ['players' => [['steamid' => STEAM_ID]]]]
+        ),
+        'empty personaname'     => json_encode(
+            ['response' => ['players' => [['steamid' => STEAM_ID, 'personaname' => '']]]]
+        ),
+        'whitespace personaname' => json_encode(
+            ['response' => ['players' => [['steamid' => STEAM_ID, 'personaname' => "  \t "]]]]
+        ),
+    ];
+    foreach ($degradedPayloads as $label => $payload) {
+        resetLogs();
+        $checker = makeChecker();
+        $checker->httpResponses = ['GetPlayerSummaries' => $payload];
+        $result = 'not-run';
+        try {
+            $result = $checker->callFetchPlayerSummary(STEAM_ID);
+        } catch (\Throwable $e) {
+            $result = 'threw: ' . $e->getMessage();
+        }
+        check(
+            "fetchPlayerSummary returns null on $label",
+            $result === null,
+            var_export($result, true)
+        );
+        check(
+            "$label logs exactly one no-persona-name error",
+            count(\XF::$loggedErrors) === 1
+                && strpos(\XF::$loggedErrors[0], 'returned no persona name') !== false,
+            'loggedErrors: ' . var_export(\XF::$loggedErrors, true)
+        );
+    }
 
     // --- Test 5: runManual (!vac) integration ---------------------------------
     $bansJson = json_encode([
