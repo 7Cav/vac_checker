@@ -1,0 +1,35 @@
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    container: php:8.3-cli
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests/*.php
+        shell: bash
+        run: |
+          set -euo pipefail
+          # failglob: zero matches is an error, not a silent green run
+          shopt -s failglob
+          failed=()
+          for t in tests/*.php; do
+            echo "=== $t"
+            if php "$t"; then
+              echo "PASS: $t"
+            else
+              rc=$?
+              echo "FAIL: $t (exit $rc)"
+              failed+=("$t")
+            fi
+          done
+          if (( ${#failed[@]} > 0 )); then
+            echo "FAILED FILES: ${failed[*]}"
+            exit 1
+          fi
+          echo "All tests passed."
