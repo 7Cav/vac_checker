@@ -218,9 +218,10 @@ namespace {
     // -----------------------------------------------------------------------
     // NBSP entity siblings (#20c): the numeric ('&#160;', '&#xA0;') and
     // named ('&NonBreakingSpace;') forms all decode to U+00A0 and must
-    // behave exactly like '&nbsp;'. Kill power: a future "simplify to
-    // str_replace('&nbsp;', …)" would pass every other check here while
-    // re-dropping these forms.
+    // behave exactly like '&nbsp;'. Kill power: special-casing '&nbsp;'
+    // (e.g. a targeted str_replace) or downgrading the decode flags from
+    // ENT_HTML5 — which alone drops '&NonBreakingSpace;' — would re-drop
+    // these forms while the '&nbsp;' checks above keep passing.
     // -----------------------------------------------------------------------
     foreach (['&#160;', '&#xA0;', '&NonBreakingSpace;'] as $entity) {
         $resetOptions();
@@ -296,10 +297,11 @@ namespace {
     // -----------------------------------------------------------------------
     // Degenerate-argument characterization: an argument made ONLY of entity
     // brackets/NBSP dissolves to whitespace under the post-decode
-    // neutralization, so the command goes unmatched — NO check fires and NO
-    // reply is sent. Deliberate, characterized contract: consistent with
-    // literal '!vac <>' (known-silent since #17). A follow-up issue tracks
-    // possibly replying with the re-run instruction instead.
+    // neutralization, so the command goes unmatched — NO check fires, NO
+    // reply is sent, and nothing is logged. Deliberate, characterized
+    // contract: consistent with literal '!vac <>' (known-silent since #17).
+    // A follow-up issue tracks possibly replying with the re-run
+    // instruction instead.
     // -----------------------------------------------------------------------
     foreach (['!vac &lt;&gt;', '!vac &nbsp;'] as $degenerate) {
         $resetOptions();
@@ -308,13 +310,16 @@ namespace {
         $check('degenerate "' . $degenerate . '": no check fires and no reply is sent',
             $manuals() === []
             && \Cav7\SteamChecker\SteamChecker::$constructed === []);
+        $check('degenerate "' . $degenerate . '": logs stay clean (silent contract)',
+            $logsClean());
     }
 
     // -----------------------------------------------------------------------
     // NBSP-inside-token characterization: U+00A0 in the middle of an id is
     // neutralized to a space like any other, so the token SPLITS there and
     // the check fires with the truncated prefix — runManual('7656119') —
-    // which downstream resolveSteamId() rejects loudly. Chosen behavior,
+    // which downstream resolution rejects loudly (resolveSteamId() returns
+    // null; runManual() posts the unresolvable reply). Chosen behavior,
     // not accidental: pinned so the truncation stays a visible contract.
     // -----------------------------------------------------------------------
     $resetOptions();

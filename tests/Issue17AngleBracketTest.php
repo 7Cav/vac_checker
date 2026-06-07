@@ -238,10 +238,12 @@ namespace {
         $manuals() === [$realId]);
 
     // -----------------------------------------------------------------------
-    // AC3: neutralized-to-spaces text must never PREVENT a !vac match — text
-    // formerly inside a closed '<…>' span no longer disappears, and a command
-    // inside such a span now fires (improvement over strip_tags, which
-    // deleted the whole span including the command).
+    // AC3: neutralization must never DELETE the command or its surrounding
+    // text the way strip_tags did — text formerly inside a closed '<…>' span
+    // no longer disappears, and a command inside such a span now fires.
+    // (Residual, post-#20/#21: an ARGUMENT made only of brackets/NBSP can
+    // still dissolve to whitespace and go unmatched — carved out in Post.php
+    // and characterized in Issue20NbspEntityBracketTest.)
     // -----------------------------------------------------------------------
     $resetOptions();
     $post = $makePost(['message' => '<!vac ' . $realId . '>']);
