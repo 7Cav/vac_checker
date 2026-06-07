@@ -185,10 +185,14 @@ namespace {
     // quote-strip + normalization + match pipeline from
     // src/addons/Cav7/SteamChecker/XF/Entity/Post.php (step-0 block through
     // the !vac preg_match). It is behavior-equivalent on the strip/normalize/
-    // match path: $this->message becomes $storedMessage, and all three PCRE
-    // guards (step-0, [URL]-unwrap, BBCode strip) keep their fail-open fallback.
-    // The observability bookkeeping those guards wrap — the logError calls, the
-    // [VAC-DEBUG] summary, and the stripped-blocks accumulator — is omitted
+    // match path: $this->message becomes $storedMessage, the three strip PCRE
+    // guards (step-0, [URL]-unwrap, BBCode strip) keep their fail-open fallback,
+    // and the final !vac preg_match collapses both no-match (0) and PCRE-error
+    // (false) to "no command" via `if (!preg_match(...)) return null;` — the
+    // same outcome as Post.php's === 1 result plus its error-logging guard, so
+    // the captured token is identical. The observability bookkeeping those four
+    // guards wrap — the logError calls (including the final-match parity log),
+    // the [VAC-DEBUG] summary, and the stripped-blocks accumulator — is omitted
     // because it never affects the captured token. BOTH fixtures below route
     // through this one closure — there must never be a second inline copy. If
     // Post.php changes, update this closure and re-pin.

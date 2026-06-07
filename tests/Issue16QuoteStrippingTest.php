@@ -112,6 +112,23 @@ namespace {
     require __DIR__ . '/../src/addons/Cav7/SteamChecker/XF/Entity/Post.php';
 
     // -----------------------------------------------------------------------
+    // PCRE-JIT pre-warm (test infrastructure for the final-match guard below).
+    // The final !vac match uses /!vac\s+(\S+)/i. Its fail-open guard is only
+    // reachable interpreter-mode: under PCRE JIT the engine treats \s+ before
+    // (\S+) as non-backtracking (disjoint classes), so no pcre.backtrack_limit
+    // value drives it to null. PHP caches a pattern's first compilation for the
+    // whole process, so compile THIS pattern once here under pcre.jit=0 — before
+    // AC1 first uses it — to pin it interpreter-mode. JIT is restored at once, so
+    // every OTHER pattern (the quote/[URL]/BBCode strips, whose backtrack-bomb
+    // coverage is calibrated for JIT) still compiles JIT'd. At normal backtrack
+    // limits this pattern returns identical 0/1 results either way; only the
+    // dedicated bt=1 guard test (case (d)) observes the difference.
+    $jitWas = ini_get('pcre.jit');
+    ini_set('pcre.jit', '0');
+    preg_match('/!vac\s+(\S+)/i', '', $warmDiscard);
+    ini_set('pcre.jit', $jitWas);
+
+    // -----------------------------------------------------------------------
     // Harness
     // -----------------------------------------------------------------------
 
@@ -533,12 +550,33 @@ namespace {
 
     // (c) BBCode strip (/\[[^\]]*\]/): this guard exists in Post.php for the
     // same fail-open reason, but is NOT behaviorally coverable in this suite.
-    // PCRE2 auto-possessifies [^\]]* (since ']' cannot follow it), eliminating
-    // backtracking, so it only nulls at backtrack_limit=1 AND only while the
-    // pattern runs un-JIT'd. By the time these cases run the pattern is already
-    // JIT-compiled by earlier checks (toggling pcre.jit cannot recompile a
-    // cached pattern mid-process), so no input reliably nulls it here. The
-    // guard is retained as cheap defense-in-depth (PCRE config/version drift).
+    // PCRE2 auto-possessifies [^\]]* — its atom is disjoint from the literal ']'
+    // that must follow, so the class never gives characters back and the pattern
+    // cannot backtrack. The backtrack-bomb technique the other guards' tests use
+    // to force preg_*() -> null therefore has nothing to exhaust on this pattern:
+    // under JIT (the mode this suite runs in) no pcre.backtrack_limit value
+    // reaches its fail-open branch. The guard is retained as cheap
+    // defense-in-depth (PCRE config/version drift).
+
+    // (d) final !vac match (/!vac\s+(\S+)/i): the fourth PCRE step, guarded for
+    // parity with the three strips. Squeeze pcre.backtrack_limit to 1 over a
+    // message whose command is followed only by whitespace — interpreter-mode
+    // \s+ must give a character back to try to satisfy (\S+), and that single
+    // backtrack exceeds the limit, so preg_match() returns false. The pattern is
+    // pre-warmed interpreter-mode above so this path is reachable. Behavior is
+    // unchanged (false is treated as no command, as it always was); the guard
+    // adds exactly ONE [Cav7/SteamChecker] '!vac match' PCRE error so the
+    // failure is observable instead of being swallowed silently.
+    $resetOptions();
+    $matchBombPost = $makePost(['message' => '!vac' . str_repeat(' ', 5000)]);
+    $withPcreLimits(['pcre.backtrack_limit' => 1], function () use ($invoke, $matchBombPost) {
+        $invoke($matchBombPost);
+    });
+    [, $manuals] = $spy();
+    $check('PCRE fail-open: final !vac-match null fires no command (behavior unchanged)',
+        $manuals === [] && \Cav7\SteamChecker\SteamChecker::$constructed === []);
+    $check('PCRE fail-open: final !vac-match null logs one [Cav7/SteamChecker] match PCRE error',
+        count($pcreGuardErrors('!vac match')) === 1);
 
     // -----------------------------------------------------------------------
     // AC6: permission/routing gates — characterization, behavior unchanged.
