@@ -3,7 +3,10 @@
 /**
  * Issue #6 — persona name in ban report.
  *
- * Self-contained test script. No framework, no network. Run with:
+ * Self-contained test script. No framework. No network for the code paths
+ * under test: httpGet is stubbed in the testable subclass. Caveat: do not
+ * feed s.team URLs into these tests — resolveSteamShortLink() uses raw curl
+ * directly (not httpGet) and would hit the real network. Run with:
  *   docker run --rm -v /path/to/repo:/app -w /app php:8.3-cli php tests/Issue6PersonaNameTest.php
  *
  * Exits non-zero on any failure.
@@ -87,11 +90,19 @@ namespace Cav7\SteamChecker {
         /** @var array<string, ?string> URL-substring => response body (null = request failure) */
         public $httpResponses = [];
 
+        /** @var string[] URL substrings for which httpGet throws (catch-path coverage) */
+        public $httpThrows = [];
+
         /** @var string[] messages passed to postReply */
         public $posted = [];
 
         protected function httpGet(string $url): ?string
         {
+            foreach ($this->httpThrows as $needle) {
+                if (strpos($url, $needle) !== false) {
+                    throw new \RuntimeException('stubbed httpGet failure: ' . $needle);
+                }
+            }
             foreach ($this->httpResponses as $needle => $response) {
                 if (strpos($url, $needle) !== false) {
                     return $response;
@@ -150,6 +161,14 @@ namespace Issue6Tests {
     }
 
     const STEAM_ID = '76561198000000001';
+
+    // Stub needle for the summaries success response. Keyed on the endpoint
+    // plus 'steamids=' . STEAM_ID (not the bare 'GetPlayerSummaries'
+    // substring) so passing a wrong variable into the fetch fails the test.
+    // The endpoint prefix is needed because the GetPlayerBans URL also
+    // contains 'steamids=' . STEAM_ID.
+    const SUMMARIES_NEEDLE = 'GetPlayerSummaries/v2/?key=TESTKEY&steamids=' . STEAM_ID;
+
     const CLEAN_BAN_DATA = [
         'NumberOfVACBans'  => 0,
         'NumberOfGameBans' => 0,
@@ -335,7 +354,7 @@ namespace Issue6Tests {
     ]);
 
     $checker = makeChecker();
-    $checker->httpResponses = ['GetPlayerSummaries' => $summaryJson];
+    $checker->httpResponses = [SUMMARIES_NEEDLE => $summaryJson];
     check(
         'fetchPlayerSummary returns persona name from valid response',
         $checker->callFetchPlayerSummary(STEAM_ID) === 'GamerDude'
@@ -366,7 +385,7 @@ namespace Issue6Tests {
 
     resetLogs();
     $checker = makeChecker();
-    $checker->httpResponses = ['GetPlayerSummaries' => 'this is not json'];
+    $checker->httpResponses = [SUMMARIES_NEEDLE => 'this is not json'];
     $result = 'not-run';
     try {
         $result = $checker->callFetchPlayerSummary(STEAM_ID);
@@ -391,7 +410,7 @@ namespace Issue6Tests {
 
     resetLogs();
     $checker = makeChecker();
-    $checker->httpResponses = ['GetPlayerSummaries' => json_encode(['response' => ['players' => []]])];
+    $checker->httpResponses = [SUMMARIES_NEEDLE => json_encode(['response' => ['players' => []]])];
     $result = 'not-run';
     try {
         $result = $checker->callFetchPlayerSummary(STEAM_ID);
@@ -439,7 +458,7 @@ namespace Issue6Tests {
     foreach ($degradedPayloads as $label => $payload) {
         resetLogs();
         $checker = makeChecker();
-        $checker->httpResponses = ['GetPlayerSummaries' => $payload];
+        $checker->httpResponses = [SUMMARIES_NEEDLE => $payload];
         $result = 'not-run';
         try {
             $result = $checker->callFetchPlayerSummary(STEAM_ID);
@@ -474,7 +493,7 @@ namespace Issue6Tests {
     $checker = makeChecker();
     $checker->httpResponses = [
         'GetPlayerBans'      => $bansJson,
-        'GetPlayerSummaries' => $summaryJson,
+        SUMMARIES_NEEDLE => $summaryJson,
     ];
     $checker->runManual(STEAM_ID);
     check(
@@ -484,6 +503,7 @@ namespace Issue6Tests {
         'posted: ' . var_export($checker->posted, true)
     );
 
+    resetLogs();
     $checker = makeChecker();
     $checker->httpResponses = [
         'GetPlayerBans' => $bansJson,
@@ -504,11 +524,17 @@ namespace Issue6Tests {
             && strpos($checker->posted[0], 'Steam API error') === false,
         'threw: ' . var_export($threw, true) . ' posted: ' . var_export($checker->posted, true)
     );
+    check(
+        'runManual summaries fetch failure logs exactly one network error',
+        count(\XF::$loggedErrors) === 1
+            && strpos(\XF::$loggedErrors[0], 'request failed (network)') !== false,
+        'loggedErrors: ' . var_export(\XF::$loggedErrors, true)
+    );
 
     $checker = makeChecker();
     $checker->httpResponses = [
         // GetPlayerBans unmatched -> httpGet returns null (API failure)
-        'GetPlayerSummaries' => $summaryJson,
+        SUMMARIES_NEEDLE => $summaryJson,
     ];
     $checker->runManual(STEAM_ID);
     check(
@@ -520,7 +546,7 @@ namespace Issue6Tests {
     );
 
     // --- Test 6: run() automatic first-post check ----------------------------
-    function makeRunChecker(?string $summaryResponse = null): Issue6TestableChecker
+    function makeRunChecker(?string $summaryResponse = null, bool $withBans = true): Issue6TestableChecker
     {
         global $bansJson, $summaryJson;
         $post = new FakePost();
@@ -535,9 +561,11 @@ namespace Issue6Tests {
         \XF::$em = $em;
 
         $checker = makeChecker();
-        $checker->httpResponses = ['GetPlayerBans' => $bansJson];
+        if ($withBans) {
+            $checker->httpResponses['GetPlayerBans'] = $bansJson;
+        }
         if ($summaryResponse !== null) {
-            $checker->httpResponses['GetPlayerSummaries'] = $summaryResponse;
+            $checker->httpResponses[SUMMARIES_NEEDLE] = $summaryResponse;
         }
         return $checker;
     }
@@ -551,6 +579,7 @@ namespace Issue6Tests {
         'posted: ' . var_export($checker->posted, true)
     );
 
+    resetLogs();
     $checker = makeRunChecker(); // no summaries response -> fetch failure
     $threw = null;
     try {
@@ -565,6 +594,87 @@ namespace Issue6Tests {
             && strpos($checker->posted[0], 'Profile Name: (unknown)') !== false
             && strpos($checker->posted[0], 'Steam API error') === false,
         'threw: ' . var_export($threw, true) . ' posted: ' . var_export($checker->posted, true)
+    );
+    check(
+        'run() summaries fetch failure logs exactly one network error',
+        count(\XF::$loggedErrors) === 1
+            && strpos(\XF::$loggedErrors[0], 'request failed (network)') !== false,
+        'loggedErrors: ' . var_export(\XF::$loggedErrors, true)
+    );
+
+    // --- Test 6b: run() GetPlayerBans failure ---------------------------------
+    resetLogs();
+    $checker = makeRunChecker($summaryJson, false); // bans fetch fails
+    $checker->run();
+    check(
+        'run() GetPlayerBans failure still posts API-error reply',
+        count($checker->posted) === 1
+            && strpos($checker->posted[0], 'Steam API error') !== false
+            && strpos($checker->posted[0], 'Profile Name:') === false,
+        'posted: ' . var_export($checker->posted, true)
+    );
+    check(
+        'run() GetPlayerBans failure logs the API exception',
+        count(\XF::$loggedExceptions) === 1
+            && strpos(\XF::$loggedExceptions[0], 'Steam API error: ') !== false
+            && strpos(\XF::$loggedExceptions[0], 'GetPlayerBans request failed') !== false,
+        'loggedExceptions: ' . var_export(\XF::$loggedExceptions, true)
+    );
+
+    // --- Test 7: throwing summaries fetch (catch-path coverage) ---------------
+    // httpGet THROWS for GetPlayerSummaries URLs: the try/catch around
+    // fetchPlayerSummary() in run()/runManual() must contain it.
+    resetLogs();
+    $checker = makeChecker();
+    $checker->httpResponses = ['GetPlayerBans' => $bansJson];
+    $checker->httpThrows = ['GetPlayerSummaries'];
+    $threw = null;
+    try {
+        $checker->runManual(STEAM_ID);
+    } catch (\Throwable $e) {
+        $threw = $e->getMessage();
+    }
+    check(
+        'runManual survives a throwing summaries fetch and posts full report',
+        $threw === null
+            && count($checker->posted) === 1
+            && strpos($checker->posted[0], 'Profile Name: (unknown)') !== false
+            && strpos($checker->posted[0], 'VAC Bans: 0') !== false
+            && strpos($checker->posted[0], 'No bans found') !== false,
+        'threw: ' . var_export($threw, true) . ' posted: ' . var_export($checker->posted, true)
+    );
+    check(
+        'runManual captures the summaries exception via logException',
+        count(\XF::$loggedExceptions) === 1
+            && strpos(\XF::$loggedExceptions[0], '!vac player summary error: ') !== false
+            && strpos(\XF::$loggedExceptions[0], 'stubbed httpGet failure') !== false,
+        'loggedExceptions: ' . var_export(\XF::$loggedExceptions, true)
+    );
+
+    resetLogs();
+    $checker = makeRunChecker();
+    $checker->httpThrows = ['GetPlayerSummaries'];
+    $threw = null;
+    try {
+        $checker->run();
+    } catch (\Throwable $e) {
+        $threw = $e->getMessage();
+    }
+    check(
+        'run() survives a throwing summaries fetch and posts full report',
+        $threw === null
+            && count($checker->posted) === 1
+            && strpos($checker->posted[0], 'Profile Name: (unknown)') !== false
+            && strpos($checker->posted[0], 'VAC Bans: 0') !== false
+            && strpos($checker->posted[0], 'No bans found') !== false,
+        'threw: ' . var_export($threw, true) . ' posted: ' . var_export($checker->posted, true)
+    );
+    check(
+        'run() captures the summaries exception via logException',
+        count(\XF::$loggedExceptions) === 1
+            && strpos(\XF::$loggedExceptions[0], 'Player summary error: ') !== false
+            && strpos(\XF::$loggedExceptions[0], 'stubbed httpGet failure') !== false,
+        'loggedExceptions: ' . var_export(\XF::$loggedExceptions, true)
     );
 
     // --- Summary -------------------------------------------------------------
