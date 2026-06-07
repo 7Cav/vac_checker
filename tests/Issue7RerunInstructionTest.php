@@ -179,54 +179,56 @@ namespace {
     // included, innermost-out) BEFORE the normalization pipeline, so a quoted
     // instruction line never matches the !vac command at all: a bare
     // quote-reply fires no check, and a real command typed below the quote is
-    // no longer shadowed. The pipeline below is copied byte-for-byte from
-    // src/addons/Cav7/SteamChecker/XF/Entity/Post.php lines 82-99 (with
-    // $this->message replaced by $fixture); if Post.php changes, update this
-    // copy and re-pin.
+    // no longer shadowed.
+    //
+    // BYTE-SYNC PIN: $commandPipeline below is the SINGLE replica of the
+    // quote-strip + normalization + match pipeline from
+    // src/addons/Cav7/SteamChecker/XF/Entity/Post.php (step-0 block through
+    // the !vac preg_match; $this->message replaced by $storedMessage, the
+    // PCRE-failure logError replaced by the fail-open fallback alone). BOTH
+    // fixtures below route through this one closure — there must never be a
+    // second inline copy. If Post.php changes, update this closure and re-pin.
     // ------------------------------------------------------------------------
+    $commandPipeline = function (string $storedMessage): ?string {
+        $message = $storedMessage;
+        do {
+            $stripped = preg_replace(
+                '/\[QUOTE(?:=[^\]]*)?\](?:[^\[]++|\[(?!QUOTE|\/QUOTE\]))*+\[\/QUOTE\]/i',
+                '',
+                $message,
+                -1,
+                $quoteCount
+            );
+            if ($stripped === null) {
+                $message = $storedMessage; // fail open per documented contract
+                break;
+            }
+            $message = $stripped;
+        } while ($quoteCount > 0);
+
+        $plain = preg_replace('/\[URL[^\]]*\](.*?)\[\/URL\]/is', '$1', $message);
+        $plain = preg_replace('/\[[^\]]*\]/', ' ', $plain);
+        $plain = html_entity_decode(strip_tags($plain), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+        if (!preg_match('/!vac\s+(\S+)/i', $plain, $m)) {
+            return null;
+        }
+        return trim($m[1]);
+    };
+
     $fixture = '[QUOTE="VAC Bot, post: 123, member: 99"]' . "\n"
         . $apiError . "\n"
         . '[/QUOTE]' . "\n"
         . 'Looks like the check failed — can someone take a look?';
 
-    $message = $fixture;
-    do {
-        $message = preg_replace(
-            '/\[QUOTE(?:=[^\]]*)?\](?:(?!\[QUOTE)[\s\S])*?\[\/QUOTE\]/i',
-            '',
-            $message,
-            -1,
-            $quoteCount
-        );
-    } while ($quoteCount > 0);
-
-    $plain = preg_replace('/\[URL[^\]]*\](.*?)\[\/URL\]/is', '$1', $message);
-    $plain = preg_replace('/\[[^\]]*\]/', ' ', $plain);
-    $plain = html_entity_decode(strip_tags($plain), ENT_QUOTES | ENT_HTML5, 'UTF-8');
-
-    $quoteMatched = preg_match('/!vac\s+(\S+)/i', $plain, $qm);
-
     $check('quote-reply pipeline does NOT match !vac in the quoted instruction (issue #16)',
-        $quoteMatched === 0);
+        $commandPipeline($fixture) === null);
 
     // Same fixture with a real command typed below the quote: the typed
     // token must be the one captured (no shadowing by the quoted line).
-    $plain2 = $fixture . "\n" . '!vac 76561198000000001';
-    do {
-        $plain2 = preg_replace(
-            '/\[QUOTE(?:=[^\]]*)?\](?:(?!\[QUOTE)[\s\S])*?\[\/QUOTE\]/i',
-            '',
-            $plain2,
-            -1,
-            $quoteCount
-        );
-    } while ($quoteCount > 0);
-    $plain2 = preg_replace('/\[URL[^\]]*\](.*?)\[\/URL\]/is', '$1', $plain2);
-    $plain2 = preg_replace('/\[[^\]]*\]/', ' ', $plain2);
-    $plain2 = html_entity_decode(strip_tags($plain2), ENT_QUOTES | ENT_HTML5, 'UTF-8');
     $check('quote-reply pipeline captures the command typed below the quote',
-        preg_match('/!vac\s+(\S+)/i', $plain2, $qm2) === 1
-        && ($qm2[1] ?? null) === '76561198000000001');
+        $commandPipeline($fixture . "\n" . '!vac 76561198000000001')
+            === '76561198000000001');
 
     // Existing failure content must remain.
     $check('unresolvable reply keeps its header',

@@ -77,17 +77,31 @@ class Post extends XFCP_Post
         // Step 0: remove [QUOTE]...[/QUOTE] blocks (bare and attributed forms),
         // contents included — quoted text is someone else's words and must never
         // be parsed as this user's command (issue #16). Strips iteratively,
-        // innermost-out, so nested quotes are fully removed; unbalanced quote
-        // markup is left as-is (fail open — accepted edge case).
+        // innermost-out, so nested quotes are fully removed. Fail-open contract:
+        // unbalanced quote markup is left as-is (no match), and any PCRE failure
+        // falls back to the unstripped message with a logged error — in neither
+        // case may a valid command be silently swallowed. The body uses unrolled
+        // possessive quantifiers ((?:[^\[]++|\[(?!…))*+) so large posts cannot
+        // exhaust the PCRE backtracking/JIT stack.
         $message = $this->message;
+        $strippedBlocks = 0;
         do {
-            $message = preg_replace(
-                '/\[QUOTE(?:=[^\]]*)?\](?:(?!\[QUOTE)[\s\S])*?\[\/QUOTE\]/i',
+            $stripped = preg_replace(
+                '/\[QUOTE(?:=[^\]]*)?\](?:[^\[]++|\[(?!QUOTE|\/QUOTE\]))*+\[\/QUOTE\]/i',
                 '',
                 $message,
                 -1,
                 $quoteCount
             );
+            if ($stripped === null) {
+                \XF::logError('[Cav7/SteamChecker] Quote stripping failed (PCRE: '
+                    . preg_last_error_msg() . ') for post_id=' . $this->post_id
+                    . '; falling back to unstripped message.');
+                $message = $this->message; // fail open per documented contract
+                break;
+            }
+            $message = $stripped;
+            $strippedBlocks += $quoteCount;
         } while ($quoteCount > 0);
 
         // Strip BBCode and HTML from the message, then look for the !vac command.
@@ -96,7 +110,16 @@ class Post extends XFCP_Post
         $plain = preg_replace('/\[[^\]]*\]/', ' ', $plain);
         $plain = html_entity_decode(strip_tags($plain), ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
-        if (!preg_match('/!vac\s+(\S+)/i', $plain, $m)) {
+        $vacMatched = preg_match('/!vac\s+(\S+)/i', $plain, $m) === 1;
+
+        if (\XF::options()->steamCheckerDebugLog) {
+            \XF::logError('[VAC-DEBUG] Post._postSave: quote strip for post_id='
+                . $this->post_id
+                . ' stripped_blocks=' . $strippedBlocks
+                . ' vac_match=' . ($vacMatched ? 'yes' : 'no'));
+        }
+
+        if (!$vacMatched) {
             return;
         }
 

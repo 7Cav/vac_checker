@@ -130,6 +130,7 @@ namespace {
      */
     $makePost = function (array $overrides = []) {
         $defaults = [
+            'post_id'  => 101,
             'user_id'  => 5,
             'position' => 1,
             'message'  => '',
@@ -252,6 +253,66 @@ namespace {
         $manuals === [$realId]);
 
     // -----------------------------------------------------------------------
+    // Sibling quotes with the real command typed BETWEEN them: each block is
+    // stripped individually, so the command survives. Kills the greedy mutant
+    // (\[QUOTE[\s\S]*\[\/QUOTE\]) that would strip from the first opener to
+    // the last closer and eat the command.
+    // -----------------------------------------------------------------------
+    $resetOptions();
+    $post = $makePost(['message' =>
+        '[QUOTE="Staff A, post: 200"]first quoted !vac 76561197999999991[/QUOTE]' . "\n"
+        . '!vac ' . $realId . "\n"
+        . '[QUOTE="Staff B, post: 201"]second quoted !vac 76561197999999992[/QUOTE]']);
+    $invoke($post);
+    [, $manuals] = $spy();
+    $check('sibling quotes: command typed between them fires with exactly that id',
+        $manuals === [$realId]);
+
+    // Command typed ABOVE the quote: pins the first-match + strip interplay
+    // (strip happens before matching, so position relative to the quote is
+    // irrelevant — the typed id always wins).
+    $resetOptions();
+    $post = $makePost(['message' => '!vac ' . $realId . "\n" . $quotedFailureReply]);
+    $invoke($post);
+    [, $manuals] = $spy();
+    $check('command above the quote: typed id wins',
+        $manuals === [$realId]);
+
+    // -----------------------------------------------------------------------
+    // Characterization: attribute containing ']' — e.g. a username with a
+    // bracketed tag. The opener pattern only matches up to the first ']'
+    // ([QUOTE="name [admin) and the attribute residue (, post: 1"]) is then
+    // consumed as quote BODY, so the block is still fully stripped up to its
+    // [/QUOTE]. This works by that opener/residue interaction, not by design;
+    // this test protects it from a future regex cleanup.
+    // -----------------------------------------------------------------------
+    $resetOptions();
+    $post = $makePost(['message' =>
+        '[QUOTE="name [admin], post: 1"]quoted !vac 76561197999999993[/QUOTE]' . "\n"
+        . '!vac ' . $realId]);
+    $invoke($post);
+    [, $manuals] = $spy();
+    $check('attribute containing "]": block fully stripped, command below fires',
+        $manuals === [$realId]);
+
+    // -----------------------------------------------------------------------
+    // Characterization (accepted behavior): stray [QUOTE]/[/QUOTE] markers
+    // inside [CODE] blocks pair across them — the stripper is BBCode-naive
+    // and removes from the [QUOTE] in the first code block to the [/QUOTE]
+    // in the second, eating a command typed between. Accepted because it
+    // fails SAFE (no check fires; staff can repost without the code blocks).
+    // -----------------------------------------------------------------------
+    $resetOptions();
+    $post = $makePost(['message' =>
+        '[CODE]example [QUOTE] marker[/CODE]' . "\n"
+        . '!vac ' . $realId . "\n"
+        . '[CODE]example [/QUOTE] marker[/CODE]']);
+    $invoke($post);
+    [, $manuals] = $spy();
+    $check('stray quote markers in [CODE] blocks eat the command between (accepted, fails safe)',
+        $manuals === [] && \Cav7\SteamChecker\SteamChecker::$constructed === []);
+
+    // -----------------------------------------------------------------------
     // AC5: !vac in a quote-free reply behaves byte-for-byte as today.
     // -----------------------------------------------------------------------
     $resetOptions();
@@ -292,6 +353,84 @@ namespace {
     [, $manuals] = $spy();
     $check('unbalanced quote markup fails open (degrades to first-match behavior)',
         $manuals === ['.']);
+
+    // -----------------------------------------------------------------------
+    // Large-input regression (issue #16 hardening): the original lazy
+    // per-character body pattern exhausted the PCRE JIT stack at ~24.6KB of
+    // quote body on PHP 8.3 defaults, making preg_replace return null and
+    // silently swallowing valid commands. Quote stripping must survive
+    // realistic large posts.
+    // -----------------------------------------------------------------------
+
+    // (i) Well-formed quote with a >=64KB body + real command below it:
+    // the command must fire with exactly the typed id.
+    $resetOptions();
+    $post = $makePost(['message' =>
+        '[QUOTE="VAC Bot, post: 123, member: 99"]' . str_repeat('a', 65536) . '[/QUOTE]'
+        . "\n" . '!vac ' . $realId]);
+    $invoke($post);
+    [, $manuals] = $spy();
+    $check('large input: 64KB balanced quote stripped; typed command fires',
+        $manuals === [$realId]);
+
+    // (ii) Unclosed [QUOTE] opener followed by a >=64KB tail containing the
+    // quoted instruction text: must degrade to the documented fail-open
+    // behavior (old flatten path -> the instruction's '!vac .' token), NOT
+    // silence.
+    $resetOptions();
+    $post = $makePost(['message' =>
+        '[QUOTE="VAC Bot, post: 123, member: 99"]' . "\n"
+        . $failureReply . "\n"
+        . str_repeat('x', 65536)]); // no [/QUOTE]
+    $invoke($post);
+    [, $manuals] = $spy();
+    $check('large input: unclosed opener + 64KB tail fails open (token \'.\'), not silent',
+        $manuals === ['.']);
+
+    // -----------------------------------------------------------------------
+    // Debug observability: with steamCheckerDebugLog on, the strip phase
+    // emits ONE [VAC-DEBUG] summary line (post_id, blocks stripped, whether
+    // !vac matched post-strip) so silent-no-fire cases are diagnosable.
+    // With the option off, no such line is emitted.
+    // -----------------------------------------------------------------------
+    $stripDebugLines = function (): array {
+        return array_values(array_filter(\XF::$loggedErrors, function ($msg) {
+            return strpos($msg, '[VAC-DEBUG]') !== false
+                && strpos($msg, 'quote strip') !== false;
+        }));
+    };
+
+    // Debug on, quote + command: one summary line, correct fields.
+    $resetOptions();
+    \XF::$optionsData['steamCheckerDebugLog'] = true;
+    $post = $makePost(['message' => $quotedFailureReply . "\n" . '!vac ' . $realId]);
+    $invoke($post);
+    $lines = $stripDebugLines();
+    $check('debug on: exactly one quote-strip summary line emitted',
+        count($lines) === 1);
+    $check('debug on: summary reports post_id, blocks stripped and a match',
+        isset($lines[0])
+        && strpos($lines[0], 'post_id=101') !== false
+        && strpos($lines[0], 'stripped_blocks=1') !== false
+        && strpos($lines[0], 'vac_match=yes') !== false);
+
+    // Debug on, bare quote-reply (nothing fires): summary still emitted,
+    // reporting no match — the silent path is observable.
+    $resetOptions();
+    \XF::$optionsData['steamCheckerDebugLog'] = true;
+    $post = $makePost(['message' => $quotedFailureReply]);
+    $invoke($post);
+    $lines = $stripDebugLines();
+    $check('debug on: bare quote-reply still emits the summary, reporting no match',
+        count($lines) === 1
+        && strpos($lines[0], 'vac_match=no') !== false);
+
+    // Debug off: no quote-strip summary line.
+    $resetOptions();
+    $post = $makePost(['message' => $quotedFailureReply . "\n" . '!vac ' . $realId]);
+    $invoke($post);
+    $check('debug off: no quote-strip summary line emitted',
+        $stripDebugLines() === []);
 
     // -----------------------------------------------------------------------
     // AC6: permission/routing gates — characterization, behavior unchanged.
