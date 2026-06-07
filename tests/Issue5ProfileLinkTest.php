@@ -225,7 +225,7 @@ namespace Issue5Tests {
         '[B]Steam VAC Check[/B]',
         '[COLOR=rgb(184, 49, 47)][B]⚠️ Could not determine a valid Steam ID from the application. Manual check required.[/B][/COLOR]',
         'Raw value: bogus-value',
-        '[I]Staff can re-run this check by replying in this thread with [ICODE]!vac <Steam64ID or profile URL>[/ICODE].[/I]',
+        '[I]Staff can re-run this check by replying in this thread with [ICODE]!vac your Steam64ID or profile URL[/ICODE].[/I]',
     ]);
     check(
         'unresolvable reply is byte-for-byte unchanged from the pre-issue-5 output',
@@ -282,7 +282,7 @@ namespace Issue5Tests {
         '[B]Steam VAC Check[/B]',
         LINKED_ID_LINE,
         '[COLOR=rgb(184, 49, 47)][B]⚠️ Steam API error — could not complete the ban check. Manual check required.[/B][/COLOR]',
-        '[I]Staff can re-run this check by replying in this thread with [ICODE]!vac <Steam64ID or profile URL>[/ICODE].[/I]',
+        '[I]Staff can re-run this check by replying in this thread with [ICODE]!vac your Steam64ID or profile URL[/ICODE].[/I]',
     ]);
     check(
         'API-error reply matches byte-for-byte with linked SteamID line',

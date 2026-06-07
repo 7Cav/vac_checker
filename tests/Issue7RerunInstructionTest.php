@@ -120,6 +120,13 @@ namespace {
     $check('instruction contains no literal valid Steam64ID',
         !preg_match('/7656119\d{10}/', $line));
 
+    // Issue #17 guard: no literal '<' or '>' anywhere in the instruction, so
+    // a staffer copying the placeholder verbatim never feeds angle brackets
+    // to the parser (the old '<Steam64ID or profile URL>' placeholder was a
+    // product-induced trigger for the strip_tags swallow).
+    $check('instruction contains no literal angle brackets',
+        strpos($line, '<') === false && strpos($line, '>') === false);
+
     // Uniqueness + placement: instruction appears exactly once and is the
     // final line of each failure reply.
     foreach (['unresolvable' => $unresolvable, 'API-error' => $apiError] as $name => $reply) {
@@ -139,11 +146,12 @@ namespace {
     // extract from it resolves to a real Steam account. Since issue #16 the
     // parser strips well-formed [QUOTE] blocks before matching, but unbalanced
     // quote markup fails open to the old flatten-everything behaviour, which
-    // can still yield the token '.'. Pin that token and the raw placeholder
-    // fragment ('<Steam64ID') through the real resolveSteamId(), asserting
-    // null AND zero network I/O. A future rewording whose placeholder
-    // accidentally matches the vanity-URL pattern would attempt a network
-    // call and fail here.
+    // yields the token 'your' (the first word after '!vac' in the issue-17
+    // wording; pre-#17 the strip_tags-era token was '.'). Pin that token and
+    // the partial manual copy 'Steam64ID' through the real resolveSteamId(),
+    // asserting null AND zero network I/O. A future rewording whose
+    // placeholder accidentally matches the vanity-URL pattern would attempt a
+    // network call and fail here.
     // ------------------------------------------------------------------------
     $resolveWithSpy = function (string $token): array {
         $spy = new NetworkSpySteamChecker(new \XF\Entity\Thread());
@@ -159,7 +167,7 @@ namespace {
         return [$result, $spy->networkCalls, $threw];
     };
 
-    foreach (['.', '<Steam64ID'] as $token) {
+    foreach (['your', 'Steam64ID'] as $token) {
         // resolveSteamShortLink (raw curl, not spied by httpGet) is only
         // reachable when the token contains 's.team/' — guard against that.
         $check("token '$token' does not contain s.team/ (raw-curl shortlink path unreachable)",
@@ -224,7 +232,7 @@ namespace {
         if ($bbStripped === null) {
             $bbStripped = $plain; // fail open per documented contract
         }
-        $plain = html_entity_decode(strip_tags($bbStripped), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $plain = html_entity_decode(str_replace(['<', '>'], ' ', $bbStripped), ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
         if (!preg_match('/!vac\s+(\S+)/i', $plain, $m)) {
             return null;
@@ -239,6 +247,13 @@ namespace {
 
     $check('quote-reply pipeline does NOT match !vac in the quoted instruction (issue #16)',
         $commandPipeline($fixture) === null);
+
+    // Coherence: the flatten path (unbalanced quote markup, or the bare
+    // instruction line itself) extracts exactly the placeholder token pinned
+    // through resolveSteamId() above. If the wording changes, this fails
+    // until the pinned token list is re-synced.
+    $check('flatten path extracts the pinned placeholder token from the instruction line',
+        $commandPipeline($line) === 'your');
 
     // Same fixture with a real command typed below the quote: the typed
     // token must be the one captured (no shadowing by the quoted line).
