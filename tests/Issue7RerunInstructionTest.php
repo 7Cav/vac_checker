@@ -184,10 +184,14 @@ namespace {
     // BYTE-SYNC PIN: $commandPipeline below is the SINGLE replica of the
     // quote-strip + normalization + match pipeline from
     // src/addons/Cav7/SteamChecker/XF/Entity/Post.php (step-0 block through
-    // the !vac preg_match; $this->message replaced by $storedMessage, the
-    // PCRE-failure logError replaced by the fail-open fallback alone). BOTH
-    // fixtures below route through this one closure — there must never be a
-    // second inline copy. If Post.php changes, update this closure and re-pin.
+    // the !vac preg_match). It is behavior-equivalent on the strip/normalize/
+    // match path: $this->message becomes $storedMessage, and all three PCRE
+    // guards (step-0, [URL]-unwrap, BBCode strip) keep their fail-open fallback.
+    // The observability bookkeeping those guards wrap — the logError calls, the
+    // [VAC-DEBUG] summary, and the stripped-blocks accumulator — is omitted
+    // because it never affects the captured token. BOTH fixtures below route
+    // through this one closure — there must never be a second inline copy. If
+    // Post.php changes, update this closure and re-pin.
     // ------------------------------------------------------------------------
     $commandPipeline = function (string $storedMessage): ?string {
         $message = $storedMessage;
@@ -206,9 +210,17 @@ namespace {
             $message = $stripped;
         } while ($quoteCount > 0);
 
-        $plain = preg_replace('/\[URL[^\]]*\](.*?)\[\/URL\]/is', '$1', $message);
-        $plain = preg_replace('/\[[^\]]*\]/', ' ', $plain);
-        $plain = html_entity_decode(strip_tags($plain), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $unwrapped = preg_replace('/\[URL[^\]]*\](.*?)\[\/URL\]/is', '$1', $message);
+        if ($unwrapped === null) {
+            $unwrapped = $message; // fail open per documented contract
+        }
+        $plain = $unwrapped;
+
+        $bbStripped = preg_replace('/\[[^\]]*\]/', ' ', $plain);
+        if ($bbStripped === null) {
+            $bbStripped = $plain; // fail open per documented contract
+        }
+        $plain = html_entity_decode(strip_tags($bbStripped), ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
         if (!preg_match('/!vac\s+(\S+)/i', $plain, $m)) {
             return null;

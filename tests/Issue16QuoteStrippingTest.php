@@ -362,15 +362,21 @@ namespace {
     // realistic large posts.
     // -----------------------------------------------------------------------
 
-    // (i) Well-formed quote with a >=64KB body + real command below it:
-    // the command must fire with exactly the typed id.
+    // (i) Well-formed quote with a >=64KB body + real command below it: the
+    // command must fire with exactly the typed id. The 64KB body embeds a
+    // COMPETING quoted '!vac <otherId>' positioned ABOVE the real command, so
+    // an inert pass (strip skipped / failed-open to flatten) would first-match
+    // the quoted otherId. Asserting the REAL id therefore proves the large
+    // balanced quote was actually stripped — not merely that nothing exploded.
+    $otherId = '76561197999999999';
     $resetOptions();
     $post = $makePost(['message' =>
-        '[QUOTE="VAC Bot, post: 123, member: 99"]' . str_repeat('a', 65536) . '[/QUOTE]'
-        . "\n" . '!vac ' . $realId]);
+        '[QUOTE="VAC Bot, post: 123, member: 99"]'
+        . '!vac ' . $otherId . ' ' . str_repeat('a', 65536)
+        . '[/QUOTE]' . "\n" . '!vac ' . $realId]);
     $invoke($post);
     [, $manuals] = $spy();
-    $check('large input: 64KB balanced quote stripped; typed command fires',
+    $check('large input: 64KB balanced quote (with a competing quoted command) stripped; real typed id fires',
         $manuals === [$realId]);
 
     // (ii) Unclosed [QUOTE] opener followed by a >=64KB tail containing the
@@ -431,6 +437,108 @@ namespace {
     $invoke($post);
     $check('debug off: no quote-strip summary line emitted',
         $stripDebugLines() === []);
+
+    // -----------------------------------------------------------------------
+    // PCRE fail-open guards: every preg step in the !vac pipeline (step-0
+    // quote strip, [URL] unwrap, BBCode strip) must, on a PCRE failure
+    // (preg_replace -> null), log a [Cav7/SteamChecker] error and fall back to
+    // the pre-call string — NEVER let null propagate and silently swallow a
+    // valid command typed below. Each case forces a real null by squeezing
+    // pcre.backtrack_limit so a tag-heavy body exhausts the targeted step.
+    //
+    // CRITICAL: ini_set('pcre.*') is process-global. $withPcreLimits saves the
+    // prior values and restores them in a finally so a leaked low limit cannot
+    // bleed into any later check in this same run.
+    // -----------------------------------------------------------------------
+    $withPcreLimits = function (array $limits, callable $fn) {
+        $saved = [];
+        foreach ($limits as $name => $value) {
+            $saved[$name] = ini_get($name);
+            ini_set($name, (string) $value);
+        }
+        try {
+            return $fn();
+        } finally {
+            foreach ($saved as $name => $value) {
+                ini_set($name, $value);
+            }
+        }
+    };
+
+    $pcreGuardErrors = function (string $needle): array {
+        return array_values(array_filter(\XF::$loggedErrors, function ($msg) use ($needle) {
+            return strpos($msg, '[Cav7/SteamChecker]') !== false
+                && strpos($msg, 'failed (PCRE:') !== false
+                && strpos($msg, $needle) !== false;
+        }));
+    };
+
+    // (a) [URL]-unwrap (the HIGH): a [URL ...] opener + long body exhausts the
+    // backtrack limit on the lazy (.*?), nulling the unwrap. Without the guard,
+    // null flows through the rest of the pipeline and the real command below is
+    // SILENTLY swallowed; with it, the unwrap fails open and the command fires.
+    $resetOptions();
+    $urlBombPost = $makePost(['message' =>
+        '!vac ' . $realId . "\n"
+        . '[URL]' . str_repeat('a', 5000) . '[/URL]']);
+    $withPcreLimits(['pcre.backtrack_limit' => 100], function () use ($invoke, $urlBombPost) {
+        $invoke($urlBombPost);
+    });
+    [, $manuals] = $spy();
+    $check('PCRE fail-open: [URL]-unwrap null does NOT swallow the command (real id fires)',
+        $manuals === [$realId]);
+    $check('PCRE fail-open: [URL]-unwrap null logs one [Cav7/SteamChecker] URL PCRE error',
+        count($pcreGuardErrors('URL unwrap')) === 1);
+
+    // (b) step-0 quote strip: a [QUOTE] block whose body is thousands of lone
+    // '[' forces that many iterations of the possessive loop, exhausting the
+    // backtrack limit and nulling the strip. The command typed BELOW the quote
+    // must still fire via the documented fail-open (revert to unstripped msg).
+    $resetOptions();
+    $quoteBombPost = $makePost(['message' =>
+        '[QUOTE]' . str_repeat('[a', 5000) . '[/QUOTE]' . "\n" . '!vac ' . $realId]);
+    $withPcreLimits(['pcre.backtrack_limit' => 100], function () use ($invoke, $quoteBombPost) {
+        $invoke($quoteBombPost);
+    });
+    [, $manuals] = $spy();
+    $check('PCRE fail-open: step-0 quote-strip null does NOT swallow the command (real id fires)',
+        $manuals === [$realId]);
+    $check('PCRE fail-open: step-0 quote-strip null logs one [Cav7/SteamChecker] PCRE error',
+        count($pcreGuardErrors('Quote stripping')) === 1);
+
+    // step-0 fallback must ALSO reset the debug block accumulator. This needs a
+    // genuine partial-strip-THEN-error (a single-iteration bomb nulls atomically
+    // with strippedBlocks still 0, so it cannot distinguish the reset): iteration
+    // 1 strips the inner clean quote (strippedBlocks=1), which MERGES the two
+    // surrounding 60-bracket runs into one 120-bracket run; iteration 2's attempt
+    // on that merged run exceeds the backtrack limit and nulls -> fallback to the
+    // original message (0 strips effectively applied). Without the reset the
+    // summary misreports stripped_blocks=1 while the message handed downstream
+    // had nothing removed.
+    $resetOptions();
+    \XF::$optionsData['steamCheckerDebugLog'] = true;
+    $run = str_repeat('[a', 60); // 60 < limit=100 < 120 merged (per-attempt steps)
+    $mergeThenErrPost = $makePost(['message' =>
+        '[QUOTE]' . $run . '[QUOTE]x[/QUOTE]' . $run . '[/QUOTE]'
+        . "\n" . '!vac ' . $realId]);
+    $withPcreLimits(['pcre.backtrack_limit' => 100], function () use ($invoke, $mergeThenErrPost) {
+        $invoke($mergeThenErrPost);
+    });
+    [, $manuals] = $spy();
+    $lines = $stripDebugLines();
+    $check('PCRE fail-open: partial-strip-then-error still fires the command (fail-open)',
+        $manuals === [$realId]);
+    $check('PCRE fail-open: step-0 fallback resets stripped_blocks to 0 in the debug summary',
+        count($lines) === 1 && strpos($lines[0], 'stripped_blocks=0') !== false);
+
+    // (c) BBCode strip (/\[[^\]]*\]/): this guard exists in Post.php for the
+    // same fail-open reason, but is NOT behaviorally coverable in this suite.
+    // PCRE2 auto-possessifies [^\]]* (since ']' cannot follow it), eliminating
+    // backtracking, so it only nulls at backtrack_limit=1 AND only while the
+    // pattern runs un-JIT'd. By the time these cases run the pattern is already
+    // JIT-compiled by earlier checks (toggling pcre.jit cannot recompile a
+    // cached pattern mid-process), so no input reliably nulls it here. The
+    // guard is retained as cheap defense-in-depth (PCRE config/version drift).
 
     // -----------------------------------------------------------------------
     // AC6: permission/routing gates — characterization, behavior unchanged.

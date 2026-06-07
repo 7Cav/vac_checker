@@ -81,8 +81,11 @@ class Post extends XFCP_Post
         // unbalanced quote markup is left as-is (no match), and any PCRE failure
         // falls back to the unstripped message with a logged error — in neither
         // case may a valid command be silently swallowed. The body uses unrolled
-        // possessive quantifiers ((?:[^\[]++|\[(?!…))*+) so large posts cannot
-        // exhaust the PCRE backtracking/JIT stack.
+        // possessive quantifiers ((?:[^\[]++|\[(?!…))*+) which make backtracking
+        // exhaustion vastly harder, but cannot rule it out — a large enough
+        // bracket-bomb can still hit pcre.backtrack_limit. ANY PCRE failure here
+        // (or on the [URL]/BBCode strips below) fails open with a logged error
+        // rather than silently dropping the command.
         $message = $this->message;
         $strippedBlocks = 0;
         do {
@@ -98,6 +101,7 @@ class Post extends XFCP_Post
                     . preg_last_error_msg() . ') for post_id=' . $this->post_id
                     . '; falling back to unstripped message.');
                 $message = $this->message; // fail open per documented contract
+                $strippedBlocks = 0; // reverted to original: 0 blocks effectively stripped
                 break;
             }
             $message = $stripped;
@@ -106,9 +110,27 @@ class Post extends XFCP_Post
 
         // Strip BBCode and HTML from the message, then look for the !vac command.
         // XF stores messages as BBCode; auto-linked URLs may be wrapped in [URL]...[/URL].
-        $plain = preg_replace('/\[URL[^\]]*\](.*?)\[\/URL\]/is', '$1', $message);
-        $plain = preg_replace('/\[[^\]]*\]/', ' ', $plain);
-        $plain = html_entity_decode(strip_tags($plain), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        // Both preg_replace calls below carry the same fail-open guard as step 0:
+        // a PCRE failure (e.g. a [URL bomb exhausting the backtrack limit on the
+        // lazy (.*?)) returns null, so we log and fall back to the pre-call string
+        // rather than let null propagate and silently swallow a valid command.
+        $unwrapped = preg_replace('/\[URL[^\]]*\](.*?)\[\/URL\]/is', '$1', $message);
+        if ($unwrapped === null) {
+            \XF::logError('[Cav7/SteamChecker] URL unwrap failed (PCRE: '
+                . preg_last_error_msg() . ') for post_id=' . $this->post_id
+                . '; using message as-is.');
+            $unwrapped = $message; // fail open per documented contract
+        }
+        $plain = $unwrapped;
+
+        $bbStripped = preg_replace('/\[[^\]]*\]/', ' ', $plain);
+        if ($bbStripped === null) {
+            \XF::logError('[Cav7/SteamChecker] BBCode strip failed (PCRE: '
+                . preg_last_error_msg() . ') for post_id=' . $this->post_id
+                . '; using message as-is.');
+            $bbStripped = $plain; // fail open per documented contract
+        }
+        $plain = html_entity_decode(strip_tags($bbStripped), ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
         $vacMatched = preg_match('/!vac\s+(\S+)/i', $plain, $m) === 1;
 
