@@ -74,13 +74,91 @@ class Post extends XFCP_Post
             return;
         }
 
+        // Step 0: remove [QUOTE]...[/QUOTE] blocks (bare and attributed forms),
+        // contents included — quoted text is someone else's words and must never
+        // be parsed as this user's command (issue #16). Strips iteratively,
+        // innermost-out, so nested quotes are fully removed. Fail-open contract:
+        // unbalanced quote markup is left as-is (no match), and any PCRE failure
+        // falls back to the unstripped message with a logged error rather than
+        // silently dropping the command. The body uses unrolled possessive
+        // quantifiers ((?:[^\[]++|\[(?!…))*+) which make backtracking exhaustion
+        // vastly harder, but cannot rule it out — a large enough bracket-bomb can
+        // still hit pcre.backtrack_limit. Each of the four PCRE steps below (this
+        // quote strip, the [URL] unwrap, the BBCode strip, and the final !vac
+        // match) fails open with a logged error on PCRE failure. NOTE: this is a
+        // per-PCRE-step guarantee, not a pipeline-wide one — the strip_tags()
+        // call further down can still drop a command containing an unterminated
+        // '<…>' (a known separate issue, not addressed here).
+        $message = $this->message;
+        $strippedBlocks = 0;
+        do {
+            $stripped = preg_replace(
+                '/\[QUOTE(?:=[^\]]*)?\](?:[^\[]++|\[(?!QUOTE|\/QUOTE\]))*+\[\/QUOTE\]/i',
+                '',
+                $message,
+                -1,
+                $quoteCount
+            );
+            if ($stripped === null) {
+                \XF::logError('[Cav7/SteamChecker] Quote stripping failed (PCRE: '
+                    . preg_last_error_msg() . ') for post_id=' . $this->post_id
+                    . '; falling back to unstripped message.');
+                $message = $this->message; // fail open per documented contract
+                $strippedBlocks = 0; // reverted to original: 0 blocks effectively stripped
+                break;
+            }
+            $message = $stripped;
+            $strippedBlocks += $quoteCount;
+        } while ($quoteCount > 0);
+
         // Strip BBCode and HTML from the message, then look for the !vac command.
         // XF stores messages as BBCode; auto-linked URLs may be wrapped in [URL]...[/URL].
-        $plain = preg_replace('/\[URL[^\]]*\](.*?)\[\/URL\]/is', '$1', $this->message);
-        $plain = preg_replace('/\[[^\]]*\]/', ' ', $plain);
-        $plain = html_entity_decode(strip_tags($plain), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        // Both preg_replace calls below carry the same fail-open guard as step 0:
+        // a PCRE failure (e.g. a [URL bomb exhausting the backtrack limit on the
+        // lazy (.*?)) returns null, so we log and fall back to the pre-call string
+        // rather than let null propagate and silently swallow a valid command.
+        $unwrapped = preg_replace('/\[URL[^\]]*\](.*?)\[\/URL\]/is', '$1', $message);
+        if ($unwrapped === null) {
+            \XF::logError('[Cav7/SteamChecker] URL unwrap failed (PCRE: '
+                . preg_last_error_msg() . ') for post_id=' . $this->post_id
+                . '; using message as-is.');
+            $unwrapped = $message; // fail open per documented contract
+        }
+        $plain = $unwrapped;
 
-        if (!preg_match('/!vac\s+(\S+)/i', $plain, $m)) {
+        $bbStripped = preg_replace('/\[[^\]]*\]/', ' ', $plain);
+        if ($bbStripped === null) {
+            \XF::logError('[Cav7/SteamChecker] BBCode strip failed (PCRE: '
+                . preg_last_error_msg() . ') for post_id=' . $this->post_id
+                . '; using message as-is.');
+            $bbStripped = $plain; // fail open per documented contract
+        }
+        $plain = html_entity_decode(strip_tags($bbStripped), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+        // Final match: the fourth PCRE step, carrying the same fail-open
+        // observability as the three strips above. preg_match() returns false on
+        // a PCRE failure (reachable only under a hardened, lowered global
+        // pcre.backtrack_limit — not at defaults). Behavior is unchanged: the
+        // false (error) case is treated as "no command" exactly as it was when
+        // the result was compared with === 1; the only addition is a logged
+        // error so the failure is observable like the strips, instead of being
+        // swallowed silently.
+        $vacMatchResult = preg_match('/!vac\s+(\S+)/i', $plain, $m);
+        if ($vacMatchResult === false) {
+            \XF::logError('[Cav7/SteamChecker] !vac match failed (PCRE: '
+                . preg_last_error_msg() . ') for post_id=' . $this->post_id
+                . '; treating as no command.');
+        }
+        $vacMatched = $vacMatchResult === 1;
+
+        if (\XF::options()->steamCheckerDebugLog) {
+            \XF::logError('[VAC-DEBUG] Post._postSave: quote strip for post_id='
+                . $this->post_id
+                . ' stripped_blocks=' . $strippedBlocks
+                . ' vac_match=' . ($vacMatched ? 'yes' : 'no'));
+        }
+
+        if (!$vacMatched) {
             return;
         }
 

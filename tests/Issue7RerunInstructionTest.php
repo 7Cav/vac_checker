@@ -136,12 +136,14 @@ namespace {
     // Placeholder non-resolution through the REAL resolver.
     //
     // The instruction's safety property is that no token a quote-reply can
-    // extract from it resolves to a real Steam account. Pin that directly:
-    // feed the tokens the Post.php pipeline can yield ('.', see the
-    // characterization below) and the raw placeholder fragment ('<Steam64ID')
-    // into the real resolveSteamId(), asserting null AND zero network I/O.
-    // A future rewording whose placeholder accidentally matches the
-    // vanity-URL pattern would attempt a network call and fail here.
+    // extract from it resolves to a real Steam account. Since issue #16 the
+    // parser strips well-formed [QUOTE] blocks before matching, but unbalanced
+    // quote markup fails open to the old flatten-everything behaviour, which
+    // can still yield the token '.'. Pin that token and the raw placeholder
+    // fragment ('<Steam64ID') through the real resolveSteamId(), asserting
+    // null AND zero network I/O. A future rewording whose placeholder
+    // accidentally matches the vanity-URL pattern would attempt a network
+    // call and fail here.
     // ------------------------------------------------------------------------
     $resolveWithSpy = function (string $token): array {
         $spy = new NetworkSpySteamChecker(new \XF\Entity\Thread());
@@ -171,39 +173,78 @@ namespace {
     }
 
     // ------------------------------------------------------------------------
-    // Characterization: staff quote-reply of a failure post (ACCEPTED edge
-    // case from issue #7 — this documents the behaviour, it does not defend
-    // a requirement).
+    // Characterization: staff quote-reply of a failure post.
     //
-    // When staff quote the bot's failure reply, Post.php's parsing pipeline
-    // reduces the quoted instruction to "!vac  ." — strip_tags() eats
-    // "<Steam64ID or profile URL>" as a pseudo-HTML tag — so the !vac handler
-    // fires with the literal token '.', which must never resolve (pinned
-    // above). The pipeline below is copied byte-for-byte from
-    // src/addons/Cav7/SteamChecker/XF/Entity/Post.php lines 79-83; if Post.php
-    // changes, update this copy and re-pin.
+    // Since issue #16, Post.php strips [QUOTE]…[/QUOTE] blocks (contents
+    // included, innermost-out) BEFORE the normalization pipeline, so a quoted
+    // instruction line never matches the !vac command at all: a bare
+    // quote-reply fires no check, and a real command typed below the quote is
+    // no longer shadowed.
+    //
+    // BYTE-SYNC PIN: $commandPipeline below is the SINGLE replica of the
+    // quote-strip + normalization + match pipeline from
+    // src/addons/Cav7/SteamChecker/XF/Entity/Post.php (step-0 block through
+    // the !vac preg_match). It is behavior-equivalent on the strip/normalize/
+    // match path: $this->message becomes $storedMessage, the three strip PCRE
+    // guards (step-0, [URL]-unwrap, BBCode strip) keep their fail-open fallback,
+    // and the final !vac preg_match collapses both no-match (0) and PCRE-error
+    // (false) to "no command" via `if (!preg_match(...)) return null;` — the
+    // same outcome as Post.php's === 1 result plus its error-logging guard, so
+    // the captured token is identical. The observability bookkeeping those four
+    // guards wrap — the logError calls (including the final-match parity log),
+    // the [VAC-DEBUG] summary, and the stripped-blocks accumulator — is omitted
+    // because it never affects the captured token. BOTH fixtures below route
+    // through this one closure — there must never be a second inline copy. If
+    // Post.php changes, update this closure and re-pin.
     // ------------------------------------------------------------------------
+    $commandPipeline = function (string $storedMessage): ?string {
+        $message = $storedMessage;
+        do {
+            $stripped = preg_replace(
+                '/\[QUOTE(?:=[^\]]*)?\](?:[^\[]++|\[(?!QUOTE|\/QUOTE\]))*+\[\/QUOTE\]/i',
+                '',
+                $message,
+                -1,
+                $quoteCount
+            );
+            if ($stripped === null) {
+                $message = $storedMessage; // fail open per documented contract
+                break;
+            }
+            $message = $stripped;
+        } while ($quoteCount > 0);
+
+        $unwrapped = preg_replace('/\[URL[^\]]*\](.*?)\[\/URL\]/is', '$1', $message);
+        if ($unwrapped === null) {
+            $unwrapped = $message; // fail open per documented contract
+        }
+        $plain = $unwrapped;
+
+        $bbStripped = preg_replace('/\[[^\]]*\]/', ' ', $plain);
+        if ($bbStripped === null) {
+            $bbStripped = $plain; // fail open per documented contract
+        }
+        $plain = html_entity_decode(strip_tags($bbStripped), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+        if (!preg_match('/!vac\s+(\S+)/i', $plain, $m)) {
+            return null;
+        }
+        return trim($m[1]);
+    };
+
     $fixture = '[QUOTE="VAC Bot, post: 123, member: 99"]' . "\n"
         . $apiError . "\n"
         . '[/QUOTE]' . "\n"
         . 'Looks like the check failed — can someone take a look?';
 
-    $plain = preg_replace('/\[URL[^\]]*\](.*?)\[\/URL\]/is', '$1', $fixture);
-    $plain = preg_replace('/\[[^\]]*\]/', ' ', $plain);
-    $plain = html_entity_decode(strip_tags($plain), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    $check('quote-reply pipeline does NOT match !vac in the quoted instruction (issue #16)',
+        $commandPipeline($fixture) === null);
 
-    $quoteMatched = preg_match('/!vac\s+(\S+)/i', $plain, $qm);
-
-    $check('quote-reply pipeline DOES match !vac in the quoted instruction (accepted edge case)',
-        $quoteMatched === 1);
-
-    $quotedToken = $qm[1] ?? '(no match)';
-    $check("quote-reply pipeline captures the literal token '.'",
-        $quotedToken === '.');
-
-    [$quotedResolved, $quotedCalls, $quotedThrew] = $resolveWithSpy($quotedToken);
-    $check('quoted token resolves to null with zero network I/O',
-        $quotedResolved === null && !$quotedThrew && $quotedCalls === []);
+    // Same fixture with a real command typed below the quote: the typed
+    // token must be the one captured (no shadowing by the quoted line).
+    $check('quote-reply pipeline captures the command typed below the quote',
+        $commandPipeline($fixture . "\n" . '!vac 76561198000000001')
+            === '76561198000000001');
 
     // Existing failure content must remain.
     $check('unresolvable reply keeps its header',
