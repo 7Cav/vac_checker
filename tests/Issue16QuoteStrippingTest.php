@@ -190,7 +190,7 @@ namespace {
         '[B]Steam VAC Check[/B]',
         'SteamID: [URL="https://steamcommunity.com/profiles/76561197960287930"]76561197960287930[/URL]',
         '[COLOR=rgb(184, 49, 47)][B]⚠️ Steam API error — could not complete the ban check. Manual check required.[/B][/COLOR]',
-        '[I]Staff can re-run this check by replying in this thread with [ICODE]!vac <Steam64ID or profile URL>[/ICODE].[/I]',
+        '[I]Staff can re-run this check by replying in this thread with [ICODE]!vac your Steam64ID or profile URL[/ICODE].[/I]',
     ]);
     $quotedFailureReply = '[QUOTE="VAC Bot, post: 123, member: 99"]' . "\n"
         . $failureReply . "\n"
@@ -359,7 +359,9 @@ namespace {
     // -----------------------------------------------------------------------
     // Accepted edge case (characterization, not a requirement): unbalanced
     // quote markup fails open — degrades to current flatten-everything
-    // behavior, where the quoted instruction's '!vac .' is the first match.
+    // behavior, where the quoted instruction's '!vac your' is the first match
+    // (the placeholder word 'your'; was '.' before issue #17 reworded the
+    // instruction and removed strip_tags from the pipeline).
     // -----------------------------------------------------------------------
     $unbalanced = '[QUOTE="VAC Bot, post: 123, member: 99"]' . "\n"
         . $failureReply . "\n"
@@ -369,7 +371,7 @@ namespace {
     $invoke($post);
     [, $manuals] = $spy();
     $check('unbalanced quote markup fails open (degrades to first-match behavior)',
-        $manuals === ['.']);
+        $manuals === ['your']);
 
     // -----------------------------------------------------------------------
     // Large-input regression (issue #16 hardening): the original lazy
@@ -398,7 +400,7 @@ namespace {
 
     // (ii) Unclosed [QUOTE] opener followed by a >=64KB tail containing the
     // quoted instruction text: must degrade to the documented fail-open
-    // behavior (old flatten path -> the instruction's '!vac .' token), NOT
+    // behavior (old flatten path -> the instruction's '!vac your' token), NOT
     // silence.
     $resetOptions();
     $post = $makePost(['message' =>
@@ -407,8 +409,8 @@ namespace {
         . str_repeat('x', 65536)]); // no [/QUOTE]
     $invoke($post);
     [, $manuals] = $spy();
-    $check('large input: unclosed opener + 64KB tail fails open (token \'.\'), not silent',
-        $manuals === ['.']);
+    $check('large input: unclosed opener + 64KB tail fails open (token \'your\'), not silent',
+        $manuals === ['your']);
 
     // -----------------------------------------------------------------------
     // Debug observability: with steamCheckerDebugLog on, the strip phase

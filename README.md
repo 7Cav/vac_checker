@@ -13,7 +13,8 @@ posts the result as a reply from a configured bot account.
 - **Automatic checks** — new threads in the enlistment node trigger a VAC/game
   ban lookup on the applicant's Steam account (PC applications only)
 - **Manual re-runs** — members of allowed user groups can post
-  `!vac <steam_url_or_id>` in an enlistment thread to run a check on demand
+  `!vac your-steam64id-or-profile-url` in an enlistment thread to run a check
+  on demand
 - **Flexible ID resolution** — accepts a bare SteamID64,
   `steamcommunity.com/profiles/...` URLs, vanity `steamcommunity.com/id/...`
   URLs, and `s.team` short links (including friend-invite links)

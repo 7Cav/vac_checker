@@ -594,11 +594,13 @@ class SteamChecker
     /**
      * One-line staff instruction appended to failure replies, telling staff
      * how to re-run the check via the !vac command. Deliberately contains no
-     * valid-looking SteamID64 so a quoted copy can't resolve to a real account.
+     * valid-looking SteamID64 so a quoted copy can't resolve to a real account,
+     * and no literal '<'/'>' around the placeholder so a staffer copying the
+     * line verbatim never trips the angle-bracket handling (issue #17).
      */
     protected function buildRerunInstructionLine(): string
     {
-        return '[I]Staff can re-run this check by replying in this thread with [ICODE]!vac <Steam64ID or profile URL>[/ICODE].[/I]';
+        return '[I]Staff can re-run this check by replying in this thread with [ICODE]!vac your Steam64ID or profile URL[/ICODE].[/I]';
     }
 
     // -------------------------------------------------------------------------

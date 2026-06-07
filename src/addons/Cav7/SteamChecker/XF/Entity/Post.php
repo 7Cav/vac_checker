@@ -83,12 +83,16 @@ class Post extends XFCP_Post
         // silently dropping the command. The body uses unrolled possessive
         // quantifiers ((?:[^\[]++|\[(?!…))*+) which make backtracking exhaustion
         // vastly harder, but cannot rule it out — a large enough bracket-bomb can
-        // still hit pcre.backtrack_limit. Each of the four PCRE steps below (this
-        // quote strip, the [URL] unwrap, the BBCode strip, and the final !vac
-        // match) fails open with a logged error on PCRE failure. NOTE: this is a
-        // per-PCRE-step guarantee, not a pipeline-wide one — the strip_tags()
-        // call further down can still drop a command containing an unterminated
-        // '<…>' (a known separate issue, not addressed here).
+        // still hit pcre.backtrack_limit. On PCRE failure, the three strips
+        // below (this quote strip, the [URL] unwrap, the BBCode strip) fail
+        // open with a logged error: each falls back to its input, so the
+        // command is preserved. The final !vac match instead fails noisy: a
+        // PCRE failure there is logged and treated as "no command" (command
+        // dropped, loudly). The only non-PCRE transforms in the pipeline — the
+        // str_replace angle-bracket neutralization and the entity decode below
+        // — cannot fail, so every step now either cannot fail or fails loudly
+        // (issue #17 removed the strip_tags() call that could silently drop a
+        // command preceded by, containing, or wrapped in a '<…>' pseudo-tag).
         $message = $this->message;
         $strippedBlocks = 0;
         do {
@@ -111,7 +115,7 @@ class Post extends XFCP_Post
             $strippedBlocks += $quoteCount;
         } while ($quoteCount > 0);
 
-        // Strip BBCode and HTML from the message, then look for the !vac command.
+        // Strip BBCode from the message, then look for the !vac command.
         // XF stores messages as BBCode; auto-linked URLs may be wrapped in [URL]...[/URL].
         // Both preg_replace calls below carry the same fail-open guard as step 0:
         // a PCRE failure (e.g. a [URL bomb exhausting the backtrack limit on the
@@ -133,7 +137,16 @@ class Post extends XFCP_Post
                 . '; using message as-is.');
             $bbStripped = $plain; // fail open per documented contract
         }
-        $plain = html_entity_decode(strip_tags($bbStripped), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        // Neutralize literal '<' and '>' by replacing each with a single space
+        // (issue #17). XF messages are BBCode, not HTML, so there are no real
+        // tags to strip here; under the old strip_tags() call, any '<' followed
+        // by a non-whitespace character opened a pseudo-tag deleted through the
+        // next '>', or to end-of-string when unterminated, silently
+        // swallowing valid commands ('aww <3 !vac …', '!vac <id>' typed per the
+        // bot's own old instruction). Plain str_replace — no PCRE, so no new
+        // fail-open surface; neutralized text can never prevent a !vac match.
+        // The entity decode stays unchanged.
+        $plain = html_entity_decode(str_replace(['<', '>'], ' ', $bbStripped), ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
         // Final match: the fourth PCRE step, carrying the same fail-open
         // observability as the three strips above. preg_match() returns false on
