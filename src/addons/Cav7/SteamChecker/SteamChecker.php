@@ -105,9 +105,18 @@ class SteamChecker
             return;
         }
 
+        // --- Persona name fetch (best effort — never blocks the report) ------
+        try {
+            $personaName = $this->fetchPlayerSummary($steamId64);
+            $this->debug('Persona name fetched: ' . var_export($personaName, true));
+        } catch (\Throwable $e) {
+            \XF::logException($e, false, '[Cav7/SteamChecker] Player summary error: ');
+            $personaName = null;
+        }
+
         // --- Post result ----------------------------------------------------
         $this->debug('Calling postReply.');
-        $this->postReply($this->buildBanReportMessage($steamId64, $banData));
+        $this->postReply($this->buildBanReportMessage($steamId64, $banData, $personaName));
     }
 
     /**
@@ -154,8 +163,17 @@ class SteamChecker
             return;
         }
 
+        // --- Persona name fetch (best effort — never blocks the report) ------
+        try {
+            $personaName = $this->fetchPlayerSummary($steamId64);
+            $this->debug('runManual persona name: ' . var_export($personaName, true));
+        } catch (\Throwable $e) {
+            \XF::logException($e, false, '[Cav7/SteamChecker] !vac player summary error: ');
+            $personaName = null;
+        }
+
         // --- Post result ----------------------------------------------------
-        $this->postReply($this->buildBanReportMessage($steamId64, $banData));
+        $this->postReply($this->buildBanReportMessage($steamId64, $banData, $personaName));
     }
 
     // -------------------------------------------------------------------------
@@ -212,6 +230,17 @@ class SteamChecker
     protected function stripBbCode(string $text): string
     {
         return trim(preg_replace('/\[[^\]]*\]/', '', $text));
+    }
+
+    /**
+     * Neutralizes BBCode markup in untrusted text that will be embedded in a
+     * bot post (e.g. a Steam persona name). ASCII square brackets are replaced
+     * with their fullwidth lookalikes, so injected tags like [B] or [URL=...]
+     * stay visible as text but are never parsed as markup.
+     */
+    protected function neutralizeBbCode(string $text): string
+    {
+        return str_replace(['[', ']'], ['［', '］'], $text);
     }
 
     // -------------------------------------------------------------------------
@@ -375,6 +404,33 @@ class SteamChecker
         return $data['players'][0];
     }
 
+    /**
+     * Calls the Steam GetPlayerSummaries API and returns the player's current
+     * persona (profile) name, or null if it cannot be fetched. Never throws —
+     * the persona name is decorative and must not block the ban report.
+     */
+    protected function fetchPlayerSummary(string $steamId64): ?string
+    {
+        $url = 'https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/'
+            . '?key=' . urlencode($this->apiKey)
+            . '&steamids=' . urlencode($steamId64);
+
+        $body = $this->httpGet($url);
+        if ($body === null) {
+            $this->debug('GetPlayerSummaries request failed for SteamID: ' . $steamId64);
+            return null;
+        }
+
+        $data = json_decode($body, true);
+        $name = $data['response']['players'][0]['personaname'] ?? null;
+        if (!is_string($name) || $name === '') {
+            $this->debug('GetPlayerSummaries returned no persona name for SteamID: ' . $steamId64);
+            return null;
+        }
+
+        return $name;
+    }
+
     // -------------------------------------------------------------------------
     // HTTP helpers
     // -------------------------------------------------------------------------
@@ -435,7 +491,7 @@ class SteamChecker
     // Message builders
     // -------------------------------------------------------------------------
 
-    protected function buildBanReportMessage(string $steamId64, array $banData): string
+    protected function buildBanReportMessage(string $steamId64, array $banData, ?string $personaName = null): string
     {
         $vacBans       = (int) ($banData['NumberOfVACBans'] ?? 0);
         $gameBans      = (int) ($banData['NumberOfGameBans'] ?? 0);
@@ -448,6 +504,7 @@ class SteamChecker
         $lines = [
             '[B]Steam VAC Check[/B]',
             'SteamID: ' . $steamId64,
+            'Profile Name: ' . ($personaName !== null ? $this->neutralizeBbCode($personaName) : '(unknown)'),
             'VAC Bans: ' . $vacBans,
             'Game Bans: ' . $gameBans,
         ];
