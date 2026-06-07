@@ -290,7 +290,8 @@ class SteamChecker
 
     /**
      * Calls the Steam ResolveVanityURL API and returns the SteamID64, or null
-     * if the vanity name is not found.
+     * if the vanity name is not found — or if the API returns anything other
+     * than a well-formed 17-digit SteamID64.
      *
      * @throws \RuntimeException on HTTP or API failure
      */
@@ -315,7 +316,14 @@ class SteamChecker
             return null;
         }
 
-        return $data['response']['steamid'] ?? null;
+        $steamId = $data['response']['steamid'] ?? null;
+
+        // Defense-in-depth: only ever return a well-formed SteamID64 — this
+        // value flows into BBCode replies and must never carry arbitrary API
+        // content. Anything else is treated as not-found.
+        return (is_string($steamId) && preg_match('/^\d{17}$/', $steamId))
+            ? $steamId
+            : null;
     }
 
     /**
@@ -529,7 +537,7 @@ class SteamChecker
 
         $lines = [
             '[B]Steam VAC Check[/B]',
-            'SteamID: ' . $steamId64,
+            'SteamID: ' . $this->buildSteamIdLink($steamId64),
             'Profile Name: ' . $nameLine,
             'VAC Bans: ' . $vacBans,
             'Game Bans: ' . $gameBans,
@@ -551,6 +559,18 @@ class SteamChecker
         return implode("\n", $lines);
     }
 
+    /**
+     * Renders a resolved SteamID64 as a clickable BBCode link to its Steam
+     * community profile. Visible link text is the bare ID — staff still read
+     * and copy it; only the markup around it changes. The URL is derived
+     * directly from the ID, no extra Steam API call.
+     */
+    protected function buildSteamIdLink(string $steamId64): string
+    {
+        return '[URL="https://steamcommunity.com/profiles/' . $steamId64 . '"]'
+            . $steamId64 . '[/URL]';
+    }
+
     protected function buildUnresolvableMessage(string $rawValue): string
     {
         return implode("\n", [
@@ -565,7 +585,7 @@ class SteamChecker
     {
         return implode("\n", [
             '[B]Steam VAC Check[/B]',
-            'SteamID: ' . $steamId64,
+            'SteamID: ' . $this->buildSteamIdLink($steamId64),
             '[COLOR=rgb(184, 49, 47)][B]⚠️ Steam API error — could not complete the ban check. Manual check required.[/B][/COLOR]',
             $this->buildRerunInstructionLine(),
         ]);

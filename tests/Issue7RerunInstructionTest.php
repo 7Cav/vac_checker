@@ -213,8 +213,10 @@ namespace {
             'Could not determine a valid Steam ID from the application. Manual check required.') !== false);
     $check('unresolvable reply keeps the raw value line',
         strpos($unresolvable, 'Raw value: bogus-value') !== false);
+    // SteamID line is a clickable profile link since issue #5.
     $check('API-error reply keeps the SteamID line',
-        strpos($apiError, 'SteamID: 76561197960287930') !== false);
+        strpos($apiError,
+            'SteamID: [URL="https://steamcommunity.com/profiles/76561197960287930"]76561197960287930[/URL]') !== false);
     $check('API-error reply keeps the manual-check warning',
         strpos($apiError,
             'Steam API error — could not complete the ban check. Manual check required.') !== false);
@@ -229,7 +231,7 @@ namespace {
     ]);
     $expectedBanned = implode("\n", [
         '[B]Steam VAC Check[/B]',
-        'SteamID: 76561197960287930',
+        'SteamID: [URL="https://steamcommunity.com/profiles/76561197960287930"]76561197960287930[/URL]', // linked since issue #5
         'Profile Name: (unknown)', // null persona name (issue #6) — builder called without a fetch
         'VAC Bans: 2',
         'Game Bans: 1',
@@ -250,7 +252,7 @@ namespace {
     ]);
     $expectedClean = implode("\n", [
         '[B]Steam VAC Check[/B]',
-        'SteamID: 76561197960287930',
+        'SteamID: [URL="https://steamcommunity.com/profiles/76561197960287930"]76561197960287930[/URL]', // linked since issue #5
         'Profile Name: (unknown)', // null persona name (issue #6) — builder called without a fetch
         'VAC Bans: 0',
         'Game Bans: 0',
