@@ -360,6 +360,67 @@ namespace Issue5Tests {
         'posted: ' . var_export($checker->posted, true)
     );
 
+    // --- E2E mutant-kill: profile-URL input, raw != resolved ----------------
+    // The raw input is the URL form of the ID. The SteamID line must link the
+    // bare resolved ID — never the raw input, which would produce a broken
+    // double-URL href ([URL="https://steamcommunity.com/profiles/https://..."]).
+    $profileUrlInput = 'https://steamcommunity.com/profiles/' . STEAM_ID;
+    $doubleUrlHref   = '[URL="https://steamcommunity.com/profiles/https://';
+
+    $checker = makeChecker();
+    $checker->httpResponses = [
+        'GetPlayerBans'  => $bansJson,
+        $summariesNeedle => $summaryJson,
+    ];
+    $checker->runManual($profileUrlInput);
+    check(
+        'runManual(profile URL) posts ban report with the linked bare-ID SteamID line',
+        count($checker->posted) === 1
+            && strpos($checker->posted[0], LINKED_ID_LINE) !== false
+            && strpos($checker->posted[0], $doubleUrlHref) === false,
+        'posted: ' . var_export($checker->posted, true)
+    );
+
+    $checker = makeChecker();
+    $checker->httpResponses = [
+        // GetPlayerBans unmatched -> httpGet returns null (API failure)
+        $summariesNeedle => $summaryJson,
+    ];
+    $checker->runManual($profileUrlInput);
+    check(
+        'runManual(profile URL) API failure posts API-error reply with the linked bare-ID SteamID line',
+        count($checker->posted) === 1
+            && strpos($checker->posted[0], LINKED_ID_LINE) !== false
+            && strpos($checker->posted[0], 'Steam API error') !== false
+            && strpos($checker->posted[0], $doubleUrlHref) === false,
+        'posted: ' . var_export($checker->posted, true)
+    );
+
+    $post = new FakePost();
+    $post->message = implode("\n", [
+        '[B]Platform and Game Selection[/B]',
+        'PC - Arma 3',
+        '[B]Steam64ID or Steam Account URL/Link[/B]',
+        $profileUrlInput,
+    ]);
+    $em = new FakeEm();
+    $em->entities['XF:Post:10'] = $post;
+    \XF::$em = $em;
+
+    $checker = makeChecker();
+    $checker->httpResponses = [
+        'GetPlayerBans'  => $bansJson,
+        $summariesNeedle => $summaryJson,
+    ];
+    $checker->run();
+    check(
+        'run() with profile-URL field posts ban report with the linked bare-ID SteamID line',
+        count($checker->posted) === 1
+            && strpos($checker->posted[0], LINKED_ID_LINE) !== false
+            && strpos($checker->posted[0], $doubleUrlHref) === false,
+        'posted: ' . var_export($checker->posted, true)
+    );
+
     // --- Summary -------------------------------------------------------------
     if ($failures > 0) {
         echo "\n$failures test(s) FAILED\n";
