@@ -105,9 +105,18 @@ class SteamChecker
             return;
         }
 
+        // --- Persona name fetch (best effort) --------------------------------
+        try {
+            $personaName = $this->fetchPlayerSummary($steamId64);
+            $this->debug('Persona name fetched: ' . var_export($personaName, true));
+        } catch (\Throwable $e) {
+            \XF::logException($e, false, '[Cav7/SteamChecker] Player summary error: ');
+            $personaName = null;
+        }
+
         // --- Post result ----------------------------------------------------
         $this->debug('Calling postReply.');
-        $this->postReply($this->buildBanReportMessage($steamId64, $banData));
+        $this->postReply($this->buildBanReportMessage($steamId64, $banData, $personaName));
     }
 
     /**
@@ -154,8 +163,17 @@ class SteamChecker
             return;
         }
 
+        // --- Persona name fetch (best effort) --------------------------------
+        try {
+            $personaName = $this->fetchPlayerSummary($steamId64);
+            $this->debug('runManual persona name: ' . var_export($personaName, true));
+        } catch (\Throwable $e) {
+            \XF::logException($e, false, '[Cav7/SteamChecker] !vac player summary error: ');
+            $personaName = null;
+        }
+
         // --- Post result ----------------------------------------------------
-        $this->postReply($this->buildBanReportMessage($steamId64, $banData));
+        $this->postReply($this->buildBanReportMessage($steamId64, $banData, $personaName));
     }
 
     // -------------------------------------------------------------------------
@@ -212,6 +230,23 @@ class SteamChecker
     protected function stripBbCode(string $text): string
     {
         return trim(preg_replace('/\[[^\]]*\]/', '', $text));
+    }
+
+    /**
+     * Neutralizes bracket-delimited BBCode tags in untrusted text that will be
+     * embedded in a bot post (e.g. a Steam persona name), and strips ASCII
+     * control characters. Runs of control characters (including newlines, which
+     * could otherwise fabricate extra report lines) collapse to a single space.
+     * ASCII square brackets are replaced with their fullwidth lookalikes, so
+     * injected tags like [B] or [URL=...] stay visible as text but are never
+     * parsed as markup. The substitution is visible: fullwidth brackets render
+     * differently from ASCII ones, and copy-pasted text carries the lookalikes,
+     * not the original ASCII brackets.
+     */
+    protected function neutralizeBbCode(string $text): string
+    {
+        $text = preg_replace('/[\x00-\x1F\x7F]+/', ' ', $text);
+        return str_replace(['[', ']'], ['［', '］'], $text);
     }
 
     // -------------------------------------------------------------------------
@@ -375,6 +410,43 @@ class SteamChecker
         return $data['players'][0];
     }
 
+    /**
+     * Calls the Steam GetPlayerSummaries API and returns the player's current
+     * persona (profile) name, or null if it cannot be fetched. All failure
+     * modes (HTTP failure, malformed JSON, missing fields) return null rather
+     * than throwing and are logged via \XF::logError — the persona name is
+     * decorative and must not block the ban report. Callers still wrap this
+     * in try/catch as defence-in-depth (overrides or logging failures could
+     * still throw).
+     */
+    protected function fetchPlayerSummary(string $steamId64): ?string
+    {
+        $url = 'https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/'
+            . '?key=' . urlencode($this->apiKey)
+            . '&steamids=' . urlencode($steamId64);
+
+        $body = $this->httpGet($url);
+        if ($body === null) {
+            \XF::logError('[Cav7/SteamChecker] GetPlayerSummaries request failed (network) for SteamID: ' . $steamId64);
+            return null;
+        }
+
+        $data = json_decode($body, true);
+        if (!is_array($data) || !isset($data['response'])) {
+            \XF::logError('[Cav7/SteamChecker] Unexpected GetPlayerSummaries response for SteamID ' . $steamId64 . ' (len=' . strlen($body) . '): ' . substr($body, 0, 200));
+            return null;
+        }
+
+        $name = $data['response']['players'][0]['personaname'] ?? null;
+        $name = is_string($name) ? trim($name) : '';
+        if ($name === '') {
+            \XF::logError('[Cav7/SteamChecker] GetPlayerSummaries returned no persona name for SteamID: ' . $steamId64);
+            return null;
+        }
+
+        return $name;
+    }
+
     // -------------------------------------------------------------------------
     // HTTP helpers
     // -------------------------------------------------------------------------
@@ -435,7 +507,7 @@ class SteamChecker
     // Message builders
     // -------------------------------------------------------------------------
 
-    protected function buildBanReportMessage(string $steamId64, array $banData): string
+    protected function buildBanReportMessage(string $steamId64, array $banData, ?string $personaName = null): string
     {
         $vacBans       = (int) ($banData['NumberOfVACBans'] ?? 0);
         $gameBans      = (int) ($banData['NumberOfGameBans'] ?? 0);
@@ -445,9 +517,20 @@ class SteamChecker
 
         $hasBans = $vacBans > 0 || $gameBans > 0 || $communityBan;
 
+        // [PLAIN] is a stock XF 2 BBCode that suppresses smilie conversion and
+        // URL auto-linking at render time. Safe to wrap untrusted text:
+        // neutralizeBbCode() guarantees no ASCII [/PLAIN] can survive inside
+        // the name to close the wrapper. Also: postReply() bypasses XF's
+        // message Preparer (which normally auto-links bare URLs at input
+        // time) — PLAIN removes that implicit dependency.
+        $nameLine = ($personaName !== null && trim($personaName) !== '')
+            ? '[PLAIN]' . $this->neutralizeBbCode(trim($personaName)) . '[/PLAIN]'
+            : '(unknown)';
+
         $lines = [
             '[B]Steam VAC Check[/B]',
             'SteamID: ' . $steamId64,
+            'Profile Name: ' . $nameLine,
             'VAC Bans: ' . $vacBans,
             'Game Bans: ' . $gameBans,
         ];
