@@ -181,7 +181,12 @@ namespace Issue6Tests {
     $checker = makeChecker();
     $report = $checker->callBuildBanReportMessage(STEAM_ID, CLEAN_BAN_DATA, 'GamerDude');
     $lines = explode("\n", $report);
-    $steamIdIdx = array_search('SteamID: ' . STEAM_ID, $lines, true);
+    // SteamID line is a clickable profile link since issue #5.
+    $steamIdIdx = array_search(
+        'SteamID: [URL="https://steamcommunity.com/profiles/' . STEAM_ID . '"]' . STEAM_ID . '[/URL]',
+        $lines,
+        true
+    );
     $nameIdx = array_search('Profile Name: [PLAIN]GamerDude[/PLAIN]', $lines, true);
     check(
         'builder includes Profile Name line',
