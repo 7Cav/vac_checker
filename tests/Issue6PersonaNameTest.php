@@ -157,7 +157,7 @@ namespace Issue6Tests {
     $report = $checker->callBuildBanReportMessage(STEAM_ID, CLEAN_BAN_DATA, 'GamerDude');
     $lines = explode("\n", $report);
     $steamIdIdx = array_search('SteamID: ' . STEAM_ID, $lines, true);
-    $nameIdx = array_search('Profile Name: GamerDude', $lines, true);
+    $nameIdx = array_search('Profile Name: [PLAIN]GamerDude[/PLAIN]', $lines, true);
     check(
         'builder includes Profile Name line',
         $nameIdx !== false,
@@ -183,29 +183,73 @@ namespace Issue6Tests {
         "report was:\n$report"
     );
 
+    // --- Test 2b: empty / whitespace-only persona names render (unknown) -----
+    $checker = makeChecker();
+    $report = $checker->callBuildBanReportMessage(STEAM_ID, CLEAN_BAN_DATA, '');
+    check(
+        'empty-string persona name renders (unknown)',
+        strpos($report, 'Profile Name: (unknown)') !== false,
+        "report was:\n$report"
+    );
+
+    $checker = makeChecker();
+    $report = $checker->callBuildBanReportMessage(STEAM_ID, CLEAN_BAN_DATA, "  \t ");
+    check(
+        'whitespace-only persona name renders (unknown)',
+        strpos($report, 'Profile Name: (unknown)') !== false,
+        "report was:\n$report"
+    );
+
     // --- Test 3: BBCode in persona name is neutralized -----------------------
-    function profileNameLine(string $report): ?string
+    /** @return string[] all lines starting with "Profile Name: " */
+    function profileNameLines(string $report): array
     {
+        $found = [];
         foreach (explode("\n", $report) as $line) {
             if (strpos($line, 'Profile Name: ') === 0) {
-                return $line;
+                $found[] = $line;
             }
         }
-        return null;
+        return $found;
+    }
+
+    function profileNameLine(string $report): ?string
+    {
+        $found = profileNameLines($report);
+        return $found[0] ?? null;
+    }
+
+    /** Content between the [PLAIN] wrapper tags, or null if not wrapped. */
+    function plainContent(?string $nameLine): ?string
+    {
+        if ($nameLine === null
+            || !preg_match('/^Profile Name: \[PLAIN\](.*)\[\/PLAIN\]$/s', $nameLine, $m)
+        ) {
+            return null;
+        }
+        return $m[1];
     }
 
     $checker = makeChecker();
     $report = $checker->callBuildBanReportMessage(STEAM_ID, CLEAN_BAN_DATA, '[B]x[/B]');
     $nameLine = profileNameLine($report);
+    $content = plainContent($nameLine);
     check(
-        'bold-injection name line has no ASCII brackets',
-        $nameLine !== null && strpos($nameLine, '[') === false && strpos($nameLine, ']') === false,
+        'bold-injection name is [PLAIN]-wrapped',
+        $content !== null,
         'name line: ' . var_export($nameLine, true)
     );
     check(
-        'bold-injection name text still visible',
-        $nameLine !== null && strpos($nameLine, 'x') !== false,
-        'name line: ' . var_export($nameLine, true)
+        'bold-injection name content has no ASCII brackets',
+        $content !== null && strpos($content, '[') === false && strpos($content, ']') === false,
+        'content: ' . var_export($content, true)
+    );
+    // Neutralize, not strip: the fullwidth lookalikes must be visible. A
+    // refactor that *deletes* brackets (eating [7Cav]-style clan tags) fails.
+    check(
+        'bold-injection name keeps fullwidth lookalike brackets',
+        $content !== null && strpos($content, '［B］x［/B］') !== false,
+        'content: ' . var_export($content, true)
     );
 
     $checker = makeChecker();
@@ -215,10 +259,68 @@ namespace Issue6Tests {
         '[URL=https://evil.example]y[/URL]'
     );
     $nameLine = profileNameLine($report);
+    $content = plainContent($nameLine);
     check(
-        'URL-injection name line has no ASCII brackets',
-        $nameLine !== null && strpos($nameLine, '[') === false && strpos($nameLine, ']') === false,
+        'URL-injection name content has no ASCII brackets',
+        $content !== null && strpos($content, '[') === false && strpos($content, ']') === false,
+        'content: ' . var_export($content, true)
+    );
+    check(
+        'URL-injection visible text and neutralized URL still present',
+        $content !== null
+            && strpos($content, 'y') !== false
+            && strpos($content, '［URL=https://evil.example］y［/URL］') !== false,
+        'content: ' . var_export($content, true)
+    );
+
+    // --- Test 3b: PLAIN wrapper integrity -------------------------------------
+    // An adversarial name containing a literal [/PLAIN] must not be able to
+    // close the wrapper: neutralizeBbCode fullwidth-swaps its brackets first.
+    $checker = makeChecker();
+    $report = $checker->callBuildBanReportMessage(
+        STEAM_ID,
+        CLEAN_BAN_DATA,
+        'evil[/PLAIN][B]bold[/B]'
+    );
+    $nameLine = profileNameLine($report);
+    check(
+        'adversarial [/PLAIN] cannot close the wrapper',
+        $nameLine !== null
+            && substr_count($nameLine, '[/PLAIN]') === 1
+            && substr($nameLine, -strlen('[/PLAIN]')) === '[/PLAIN]'
+            && strpos($nameLine, '［/PLAIN］') !== false,
         'name line: ' . var_export($nameLine, true)
+    );
+
+    // --- Test 3c: control-character injection ---------------------------------
+    // Newlines in a persona name must not fabricate extra report lines.
+    $checker = makeChecker();
+    $report = $checker->callBuildBanReportMessage(
+        STEAM_ID,
+        ['NumberOfVACBans' => 1, 'NumberOfGameBans' => 0, 'CommunityBanned' => false,
+         'EconomyBan' => 'none', 'DaysSinceLastBan' => 42],
+        "Bad\nVAC Bans: 0\n✅ No bans found."
+    );
+    $nameLines = profileNameLines($report);
+    check(
+        'control-char injection yields exactly one Profile Name line',
+        count($nameLines) === 1,
+        'name lines: ' . var_export($nameLines, true)
+    );
+    check(
+        'injected newlines collapse to spaces inside the name line',
+        count($nameLines) === 1
+            && strpos($nameLines[0], 'Bad VAC Bans: 0 ✅ No bans found.') !== false,
+        'name line: ' . var_export($nameLines[0] ?? null, true)
+    );
+    $reportLines = explode("\n", $report);
+    check(
+        'real ban lines unaffected by injected fake lines',
+        count(array_keys($reportLines, 'VAC Bans: 1', true)) === 1
+            && count(array_keys($reportLines, 'VAC Bans: 0', true)) === 0
+            && strpos($report, 'Days Since Last Ban: 42') !== false
+            && strpos($report, '⚠️ Ban(s) detected') !== false,
+        "report was:\n$report"
     );
 
     // --- Test 4: fetchPlayerSummary parses and degrades safely ---------------
@@ -296,7 +398,7 @@ namespace Issue6Tests {
     check(
         'runManual posts ban report with persona name',
         count($checker->posted) === 1
-            && strpos($checker->posted[0], 'Profile Name: GamerDude') !== false,
+            && strpos($checker->posted[0], 'Profile Name: [PLAIN]GamerDude[/PLAIN]') !== false,
         'posted: ' . var_export($checker->posted, true)
     );
 
@@ -363,7 +465,7 @@ namespace Issue6Tests {
     check(
         'run() posts ban report with persona name',
         count($checker->posted) === 1
-            && strpos($checker->posted[0], 'Profile Name: GamerDude') !== false,
+            && strpos($checker->posted[0], 'Profile Name: [PLAIN]GamerDude[/PLAIN]') !== false,
         'posted: ' . var_export($checker->posted, true)
     );
 

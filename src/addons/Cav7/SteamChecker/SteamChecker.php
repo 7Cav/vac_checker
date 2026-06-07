@@ -233,13 +233,19 @@ class SteamChecker
     }
 
     /**
-     * Neutralizes BBCode markup in untrusted text that will be embedded in a
-     * bot post (e.g. a Steam persona name). ASCII square brackets are replaced
-     * with their fullwidth lookalikes, so injected tags like [B] or [URL=...]
-     * stay visible as text but are never parsed as markup.
+     * Neutralizes bracket-delimited BBCode tags in untrusted text that will be
+     * embedded in a bot post (e.g. a Steam persona name), and strips ASCII
+     * control characters. Runs of control characters (including newlines, which
+     * could otherwise fabricate extra report lines) collapse to a single space.
+     * ASCII square brackets are replaced with their fullwidth lookalikes, so
+     * injected tags like [B] or [URL=...] stay visible as text but are never
+     * parsed as markup. The substitution is visible: fullwidth brackets render
+     * differently from ASCII ones, and copy-pasted text carries the lookalikes,
+     * not the original ASCII brackets.
      */
     protected function neutralizeBbCode(string $text): string
     {
+        $text = preg_replace('/[\x00-\x1F\x7F]+/', ' ', $text);
         return str_replace(['[', ']'], ['［', '］'], $text);
     }
 
@@ -501,10 +507,20 @@ class SteamChecker
 
         $hasBans = $vacBans > 0 || $gameBans > 0 || $communityBan;
 
+        // [PLAIN] is a stock XF 2 BBCode that suppresses smilie conversion and
+        // URL auto-linking at render time. Safe to wrap untrusted text:
+        // neutralizeBbCode() guarantees no ASCII [/PLAIN] can survive inside
+        // the name to close the wrapper. Also: postReply() bypasses XF's
+        // message Preparer (which normally auto-links bare URLs at input
+        // time) — PLAIN removes that implicit dependency.
+        $nameLine = ($personaName !== null && trim($personaName) !== '')
+            ? '[PLAIN]' . $this->neutralizeBbCode(trim($personaName)) . '[/PLAIN]'
+            : '(unknown)';
+
         $lines = [
             '[B]Steam VAC Check[/B]',
             'SteamID: ' . $steamId64,
-            'Profile Name: ' . ($personaName !== null ? $this->neutralizeBbCode($personaName) : '(unknown)'),
+            'Profile Name: ' . $nameLine,
             'VAC Bans: ' . $vacBans,
             'Game Bans: ' . $gameBans,
         ];
