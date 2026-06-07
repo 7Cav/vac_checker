@@ -74,9 +74,25 @@ class Post extends XFCP_Post
             return;
         }
 
+        // Step 0: remove [QUOTE]...[/QUOTE] blocks (bare and attributed forms),
+        // contents included — quoted text is someone else's words and must never
+        // be parsed as this user's command (issue #16). Strips iteratively,
+        // innermost-out, so nested quotes are fully removed; unbalanced quote
+        // markup is left as-is (fail open — accepted edge case).
+        $message = $this->message;
+        do {
+            $message = preg_replace(
+                '/\[QUOTE(?:=[^\]]*)?\](?:(?!\[QUOTE)[\s\S])*?\[\/QUOTE\]/i',
+                '',
+                $message,
+                -1,
+                $quoteCount
+            );
+        } while ($quoteCount > 0);
+
         // Strip BBCode and HTML from the message, then look for the !vac command.
         // XF stores messages as BBCode; auto-linked URLs may be wrapped in [URL]...[/URL].
-        $plain = preg_replace('/\[URL[^\]]*\](.*?)\[\/URL\]/is', '$1', $this->message);
+        $plain = preg_replace('/\[URL[^\]]*\](.*?)\[\/URL\]/is', '$1', $message);
         $plain = preg_replace('/\[[^\]]*\]/', ' ', $plain);
         $plain = html_entity_decode(strip_tags($plain), ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
