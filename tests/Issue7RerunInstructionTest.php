@@ -241,9 +241,10 @@ namespace {
         if ($bbStripped === null) {
             $bbStripped = $plain; // fail open per documented contract
         }
+        $decoded = html_entity_decode($bbStripped, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $plain = str_replace(['<', '>'], ' ', $decoded);
         $plain = str_replace(
             [
-                '<', '>',
                 "\u{00A0}", "\u{00AD}", "\u{0600}", "\u{0601}", "\u{0602}",
                 "\u{0603}", "\u{0604}", "\u{0605}", "\u{061C}", "\u{06DD}",
                 "\u{070F}", "\u{0890}", "\u{0891}", "\u{08E2}", "\u{1680}",
@@ -283,9 +284,15 @@ namespace {
                 "\u{E0078}", "\u{E0079}", "\u{E007A}", "\u{E007B}", "\u{E007C}",
                 "\u{E007D}", "\u{E007E}", "\u{E007F}",
             ],
-            ' ',
-            html_entity_decode($bbStripped, ENT_QUOTES | ENT_HTML5, 'UTF-8')
+            "\x00",
+            $plain
         );
+        $healed = preg_replace('/!\x00*v\x00*a\x00*c/i', '!vac', $plain);
+        if ($healed === null) {
+            $healed = $plain; // fail open per documented contract
+        }
+        $plain = $healed;
+        $plain = str_replace("\x00", ' ', $plain);
 
         if (!preg_match('/!vac\s+(\S+)/i', $plain, $m)) {
             return null;
@@ -311,21 +318,27 @@ namespace {
     //
     // Guards on the mechanism itself: the replica slice must contain the
     // closure signature, the entity file must exist (one clear "missing"
-    // failure instead of eight misleading "pipeline changed?" ones), the pin
-    // count is pinned, and every pin body must be non-trivial — strpos with
-    // an empty needle matches any haystack.
+    // failure instead of thirteen misleading "pipeline changed?" ones), the
+    // pin count is pinned, and every pin body must be non-trivial — strpos
+    // with an empty needle matches any haystack.
     //
-    // The quote-strip and neutralize/decode pins are the FULL multi-line
-    // calls, including leading indentation: the call bytes are identical in
-    // both files (the replica deliberately mirrors Post.php's indentation),
-    // and pinning the whole call catches drift in the replacement string /
-    // needle list / flags / count variable, not just the pattern. The
-    // neutralize needle list is the separator/format-control family
-    // (ADR-0001, issue #31: every Zs/Zl/Zp/Cf code point at Unicode 16.0
-    // minus U+0020 — 188 entries, generated once and pasted) on top of the
-    // #17 brackets ('<', '>'); dropping any single code point from either
-    // file breaks the verbatim match and fails the pin. On a Unicode bump,
-    // rerun the ADR-0001 generator and re-sync all three places.
+    // The neutralization is the multi-step sentinel+heal sequence (issue #31):
+    // decode -> brackets-to-space -> family-to-NUL-sentinel -> heal the '!vac'
+    // literal across sentinels -> sentinels-to-space. Each load-bearing
+    // statement is pinned: the entity-decode, the angle-bracket str_replace,
+    // the family->sentinel str_replace (the FULL multi-line call, including
+    // leading indentation, so drift in the replacement target "\x00" / the
+    // needle list / the subject is caught — not just the array), the heal
+    // preg_replace and its fail-open fallback, and the sentinel->space
+    // str_replace. The quote-strip pin is likewise the full multi-line call.
+    // The family needle list is the separator/format-control family (ADR-0001,
+    // issue #31: every Zs/Zl/Zp/Cf code point at Unicode 16.0 minus U+0020 —
+    // 188 entries, generated once and pasted; the #17 brackets now neutralize
+    // in their own str_replace step, so the family array is exactly the 188
+    // and the COMPLETENESS pin below asserts that count). Dropping any single
+    // code point from either file breaks the verbatim match and fails the pin.
+    // On a Unicode bump, rerun the ADR-0001 generator and re-sync all three
+    // places.
     // ------------------------------------------------------------------------
     $pins = [
         'quote-strip preg_replace call' => <<<'PIN'
@@ -352,10 +365,15 @@ PIN,
         'BBCode-strip fail-open fallback' => <<<'PIN'
 $bbStripped = $plain;
 PIN,
-        'neutralize/decode call' => <<<'PIN'
+        'entity-decode expression' => <<<'PIN'
+$decoded = html_entity_decode($bbStripped, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+PIN,
+        'angle-bracket neutralize call' => <<<'PIN'
+$plain = str_replace(['<', '>'], ' ', $decoded);
+PIN,
+        'family->sentinel neutralize call' => <<<'PIN'
         $plain = str_replace(
             [
-                '<', '>',
                 "\u{00A0}", "\u{00AD}", "\u{0600}", "\u{0601}", "\u{0602}",
                 "\u{0603}", "\u{0604}", "\u{0605}", "\u{061C}", "\u{06DD}",
                 "\u{070F}", "\u{0890}", "\u{0891}", "\u{08E2}", "\u{1680}",
@@ -395,9 +413,18 @@ PIN,
                 "\u{E0078}", "\u{E0079}", "\u{E007A}", "\u{E007B}", "\u{E007C}",
                 "\u{E007D}", "\u{E007E}", "\u{E007F}",
             ],
-            ' ',
-            html_entity_decode($bbStripped, ENT_QUOTES | ENT_HTML5, 'UTF-8')
+            "\x00",
+            $plain
         );
+PIN,
+        'literal-interior heal expression' => <<<'PIN'
+$healed = preg_replace('/!\x00*v\x00*a\x00*c/i', '!vac', $plain);
+PIN,
+        'literal-interior heal fail-open fallback' => <<<'PIN'
+$healed = $plain;
+PIN,
+        'sentinel-to-space expression' => <<<'PIN'
+$plain = str_replace("\x00", ' ', $plain);
 PIN,
         'final !vac match expression' => <<<'PIN'
 preg_match('/!vac\s+(\S+)/i', $plain, $m)
@@ -462,8 +489,8 @@ PIN,
         : '';
 
     // Anti-vacuity: a deleted pin entry must fail here, not pass silently.
-    $check('BYTE-SYNC PIN: pin lists contain all 9 pinned expressions (8 two-sided + 1 entity-only)',
-        count($pins) === 8 && count($entityOnlyPins) === 1);
+    $check('BYTE-SYNC PIN: pin lists contain all 14 pinned expressions (13 two-sided + 1 entity-only)',
+        count($pins) === 13 && count($entityOnlyPins) === 1);
 
     foreach ($pins as $pinName => $pinExpression) {
         // Anti-vacuity: an emptied pin body would make both strpos checks

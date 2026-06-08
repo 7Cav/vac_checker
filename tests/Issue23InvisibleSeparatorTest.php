@@ -419,6 +419,84 @@ namespace {
     }
 
     // -----------------------------------------------------------------------
+    // Literal-interior closure (issue #31, sentinel+heal): a family code
+    // point INSIDE the '!vac' literal itself ('!v<C>ac', '!<C>vac',
+    // '!va<C>c') formerly broke the literal — every needle neutralized to a
+    // space, so the post read '!v ac <id>' and the final ASCII match never
+    // saw a '!vac' token: fully silent (no check, no usage reply, no log).
+    // The fix neutralizes the family to a NUL SENTINEL instead of a space,
+    // heals '!\x00*v\x00*a\x00*c' back to '!vac' with an ASCII-only PCRE
+    // step, then maps the remaining sentinels (true separators) to spaces.
+    // So an interior in-family char now heals away and the command fires.
+    // Two shapes per position:
+    //   glued-with-id  "!v<C>ac <id>" -> heals -> the check fires on the id
+    //   trailing-no-id "!v<C>ac"      -> heals to bare !vac -> usage reply
+    //                                    via the #25 trailing-token rule
+    // -----------------------------------------------------------------------
+    $interiorChars = [
+        0x00AD  => 'SOFT HYPHEN',
+        0x200B  => 'ZERO WIDTH SPACE',
+        0x2028  => 'LINE SEPARATOR',
+        0xE0041 => 'TAG LATIN CAPITAL LETTER A (astral)',
+    ];
+    foreach ($interiorChars as $cp => $name) {
+        $C = mb_chr($cp, 'UTF-8');
+        $label = sprintf('U+%04X %s', $cp, $name);
+        $positions = [
+            '!v<C>ac' => '!v' . $C . 'ac',
+            '!<C>vac' => '!' . $C . 'vac',
+            '!va<C>c' => '!va' . $C . 'c',
+        ];
+        foreach ($positions as $shape => $broken) {
+            // Shape 1: glued-with-id — the literal heals, then a real space
+            // separates the id, so the check fires on the bare id.
+            $resetOptions();
+            $post = $makePost(['message' => $broken . ' ' . $realId]);
+            $invoke($post);
+            $check("interior $label $shape <id>: heals, exactly one check fires with the bare id (#31)",
+                $manuals() === [$realId]);
+            $check("interior $label $shape <id>: logs stay clean", $logsClean());
+
+            // Shape 2: trailing-no-id — the literal heals to a standalone
+            // !vac, so the #25 trailing-token rule answers with the usage
+            // reply (NOT a check, NOT silence).
+            $resetOptions();
+            $post = $makePost(['message' => $broken]);
+            $invoke($post);
+            $check("interior $label $shape trailing: no check, exactly one usage reply (#31)",
+                $manuals() === []
+                && \Cav7\SteamChecker\SteamChecker::$degenerateReplies === 1
+                && count(\Cav7\SteamChecker\SteamChecker::$constructed) === 1);
+            $check("interior $label $shape trailing: logs stay clean", $logsClean());
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // False-positive guards (issue #31): the heal repairs ONLY family
+    // sentinels glued between the literal's letters — never TYPED spaces. So
+    // real conversational traffic in this VAC community ("lol! VAC banned
+    // him", "got a ! VAC ban") and a spaced-out "! v a c" must stay SILENT:
+    // no check, no usage reply, no construction. Pinned as a characterization
+    // so a future regression to a flexible '!\s*v\s*a\s*c' match — which
+    // WOULD false-fire on these — is caught here.
+    // -----------------------------------------------------------------------
+    $falsePositiveGuards = [
+        'lol! VAC banned him' => 'lol! VAC banned him',
+        '! v a c team'        => '! v a c team',
+        'got a ! VAC ban'     => 'got a ! VAC ban',
+    ];
+    foreach ($falsePositiveGuards as $label => $message) {
+        $resetOptions();
+        $post = $makePost(['message' => $message]);
+        $invoke($post);
+        $check("false-positive guard \"$label\": stays silent (no check, no usage reply, no construction)",
+            $manuals() === []
+            && \Cav7\SteamChecker\SteamChecker::$degenerateReplies === 0
+            && \Cav7\SteamChecker\SteamChecker::$constructed === []);
+        $check("false-positive guard \"$label\": logs stay clean", $logsClean());
+    }
+
+    // -----------------------------------------------------------------------
     // Invisible-char-inside-token characterization: a family code point in
     // the middle of an id is neutralized to a space like any other, so the
     // token SPLITS there and the check fires with the truncated prefix —
