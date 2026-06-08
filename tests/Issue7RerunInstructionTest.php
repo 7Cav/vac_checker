@@ -520,6 +520,64 @@ PIN,
             strpos($replicaSource, $pinExpression) === false);
     }
 
+    // ------------------------------------------------------------------------
+    // COMPLETENESS pin (issue #31, ADR-0001 AC1).
+    //
+    // The byte-SYNC pins above prove the three places stay byte-IDENTICAL, but
+    // identical-and-wrong still passes them: drop one needle from all three at
+    // once and every check above stays green. This pin closes that gap by
+    // asserting the family needle set is EXACTLY the canonical 188 code points
+    // (Unicode 16.0 — every Zs/Zl/Zp/Cf code point minus U+0020). Adding or
+    // removing a member fails HERE even when the three places agree.
+    //
+    // The canonical set is built from the ADR-0001 category RANGES — the
+    // explicit spec, auditable against the ADR — and compared against the code
+    // points extracted from the family->sentinel pin body, which the byte-SYNC
+    // pins above tie to both Post.php and the replica. So a mismatch in any of
+    // the three places surfaces as either a byte-SYNC failure (places diverged)
+    // or a COMPLETENESS failure (places agree but the set is wrong).
+    // ------------------------------------------------------------------------
+    $canonicalRanges = [
+        [0x00A0, 0x00A0], [0x00AD, 0x00AD], [0x0600, 0x0605], [0x061C, 0x061C],
+        [0x06DD, 0x06DD], [0x070F, 0x070F], [0x0890, 0x0891], [0x08E2, 0x08E2],
+        [0x1680, 0x1680], [0x180E, 0x180E], [0x2000, 0x200F], [0x2028, 0x202F],
+        [0x205F, 0x2064], [0x2066, 0x206F], [0x3000, 0x3000], [0xFEFF, 0xFEFF],
+        [0xFFF9, 0xFFFB], [0x110BD, 0x110BD], [0x110CD, 0x110CD],
+        [0x13430, 0x1343F], [0x1BCA0, 0x1BCA3], [0x1D173, 0x1D17A],
+        [0xE0001, 0xE0001], [0xE0020, 0xE007F],
+    ]; // U+2065 deliberately absent: Cn (unassigned) inside an otherwise-Cf run
+    $canonicalCps = [];
+    foreach ($canonicalRanges as [$lo, $hi]) {
+        for ($cp = $lo; $cp <= $hi; $cp++) {
+            $canonicalCps[$cp] = true;
+        }
+    }
+    $canonicalCps = array_keys($canonicalCps);
+    sort($canonicalCps);
+
+    $check('COMPLETENESS: canonical Zs/Zl/Zp/Cf spec expands to exactly 188 code points',
+        count($canonicalCps) === 188);
+
+    // Extract the "\u{...}" needles from the family->sentinel pin body.
+    preg_match_all('~\\\\u\{([0-9A-Fa-f]+)\}~', $pins['family->sentinel neutralize call'], $needleMatches);
+    $needleCps = array_map('hexdec', $needleMatches[1]);
+
+    $check('COMPLETENESS: family needle list has exactly 188 entries'
+        . ' (brackets neutralize in their own step, so they are not counted here)',
+        count($needleCps) === 188);
+    $check('COMPLETENESS: no duplicate needles in the family list',
+        count($needleCps) === count(array_unique($needleCps)));
+    sort($needleCps);
+    $check('COMPLETENESS: family needle set equals the canonical Zs/Zl/Zp/Cf spec'
+        . ' (a member added to OR removed from all three places at once fails here)',
+        $needleCps === $canonicalCps);
+
+    // Guard the "188 exactly" claim: the angle brackets must still be
+    // neutralized in their own step, so "exactly 188 family entries" can never
+    // silently mean the #17 bracket guard was dropped.
+    $check('COMPLETENESS: angle brackets still neutralized in their own step (not folded away)',
+        strpos($pins['angle-bracket neutralize call'], "['<', '>'], ' '") !== false);
+
     $fixture = '[QUOTE="VAC Bot, post: 123, member: 99"]' . "\n"
         . $apiError . "\n"
         . '[/QUOTE]' . "\n"
