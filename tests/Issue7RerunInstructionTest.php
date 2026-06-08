@@ -237,7 +237,17 @@ namespace {
         if ($bbStripped === null) {
             $bbStripped = $plain; // fail open per documented contract
         }
-        $plain = str_replace(['<', '>', "\u{00A0}"], ' ', html_entity_decode($bbStripped, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        $plain = str_replace(
+            [
+                '<', '>', "\u{00A0}",
+                "\u{2000}", "\u{2001}", "\u{2002}", "\u{2003}", "\u{2004}",
+                "\u{2005}", "\u{2006}", "\u{2007}", "\u{2008}", "\u{2009}",
+                "\u{200A}", "\u{200B}", "\u{200C}", "\u{200D}",
+                "\u{202F}", "\u{205F}", "\u{2060}", "\u{3000}", "\u{FEFF}",
+            ],
+            ' ',
+            html_entity_decode($bbStripped, ENT_QUOTES | ENT_HTML5, 'UTF-8')
+        );
 
         if (!preg_match('/!vac\s+(\S+)/i', $plain, $m)) {
             return null;
@@ -267,11 +277,15 @@ namespace {
     // count is pinned, and every pin body must be non-trivial — strpos with
     // an empty needle matches any haystack.
     //
-    // The quote-strip pin is the FULL multi-line preg_replace call, including
-    // leading indentation: the call bytes are identical in both files (the
-    // replica deliberately mirrors Post.php's indentation), and pinning the
-    // whole call catches drift in the replacement string / flags / count
-    // variable, not just the pattern.
+    // The quote-strip and neutralize/decode pins are the FULL multi-line
+    // calls, including leading indentation: the call bytes are identical in
+    // both files (the replica deliberately mirrors Post.php's indentation),
+    // and pinning the whole call catches drift in the replacement string /
+    // needle list / flags / count variable, not just the pattern. The
+    // neutralize needle list is the issue-#23 invisible-separator family
+    // (U+2000–U+200D, U+202F, U+205F, U+2060, U+3000, U+FEFF) on top of the
+    // #17/#20 set ('<', '>', U+00A0); dropping any single code point from
+    // either file breaks the verbatim match and fails the pin.
     // ------------------------------------------------------------------------
     $pins = [
         'quote-strip preg_replace call' => <<<'PIN'
@@ -298,8 +312,18 @@ PIN,
         'BBCode-strip fail-open fallback' => <<<'PIN'
 $bbStripped = $plain;
 PIN,
-        'neutralize/decode line' => <<<'PIN'
-$plain = str_replace(['<', '>', "\u{00A0}"], ' ', html_entity_decode($bbStripped, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        'neutralize/decode call' => <<<'PIN'
+        $plain = str_replace(
+            [
+                '<', '>', "\u{00A0}",
+                "\u{2000}", "\u{2001}", "\u{2002}", "\u{2003}", "\u{2004}",
+                "\u{2005}", "\u{2006}", "\u{2007}", "\u{2008}", "\u{2009}",
+                "\u{200A}", "\u{200B}", "\u{200C}", "\u{200D}",
+                "\u{202F}", "\u{205F}", "\u{2060}", "\u{3000}", "\u{FEFF}",
+            ],
+            ' ',
+            html_entity_decode($bbStripped, ENT_QUOTES | ENT_HTML5, 'UTF-8')
+        );
 PIN,
         'final !vac match expression' => <<<'PIN'
 preg_match('/!vac\s+(\S+)/i', $plain, $m)

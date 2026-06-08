@@ -137,27 +137,53 @@ class Post extends XFCP_Post
                 . '; using message as-is.');
             $bbStripped = $plain; // fail open per documented contract
         }
-        // Decode entities, then neutralize '<', '>' and U+00A0 NO-BREAK SPACE
-        // by replacing each with a single space (issues #17, #20, #21). XF
-        // messages are BBCode, not HTML, so there are no real tags to strip
-        // here; under the old strip_tags() call, any '<' followed by a
-        // non-whitespace character opened a pseudo-tag deleted through the
-        // next '>', or to end-of-string when unterminated, silently
-        // swallowing valid commands ('aww <3 !vac …', '!vac <id>' typed per
-        // the bot's own old instruction). Neutralization runs AFTER the decode
-        // so entity-encoded brackets ('&lt;', '&#60;', …) become whitespace
-        // like literal ones instead of reappearing in the captured token
-        // (issue #21), and '&nbsp;' — like a raw U+00A0 pasted from rendered
-        // HTML — becomes a plain space the ASCII-only \s in the final match
-        // can see (issue #20). Safe order: a single-pass html_entity_decode
-        // never decodes recursively — '&amp;lt;' yields the literal text
-        // '&lt;', not a bracket — and this pipeline decodes exactly once.
-        // Plain str_replace — no PCRE, so no new fail-open surface. Residual:
-        // an argument made ONLY of brackets/NBSP ('!vac &lt;&gt;',
-        // '!vac &nbsp;') dissolves to whitespace, so the command goes
-        // unmatched silently — the same known-silent contract literal
-        // '!vac <>' has had since #17.
-        $plain = str_replace(['<', '>', "\u{00A0}"], ' ', html_entity_decode($bbStripped, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        // Decode entities, then neutralize '<', '>', U+00A0 NO-BREAK SPACE,
+        // and the invisible-separator family — U+2000–U+200D (the quad/space
+        // block, incl. ZWSP/ZWNJ/ZWJ), U+202F NARROW NO-BREAK SPACE, U+205F
+        // MEDIUM MATHEMATICAL SPACE, U+2060 WORD JOINER, U+3000 IDEOGRAPHIC
+        // SPACE, U+FEFF ZWNBSP/BOM — by replacing each with a single space
+        // (issues #17, #20, #21, #23). XF messages are BBCode, not HTML, so
+        // there are no real tags to strip here; under the old strip_tags()
+        // call, any '<' followed by a non-whitespace character opened a
+        // pseudo-tag deleted through the next '>', or to end-of-string when
+        // unterminated, silently swallowing valid commands ('aww <3 !vac …',
+        // '!vac <id>' typed per the bot's own old instruction).
+        // Neutralization runs AFTER the decode so entity-encoded brackets
+        // ('&lt;', '&#60;', …) become whitespace like literal ones instead
+        // of reappearing in the captured token (issue #21), and entity-form
+        // separators ('&nbsp;', '&thinsp;', '&numsp;', '&emsp;',
+        // '&MediumSpace;', '&NoBreak;', '&ZeroWidthSpace;', …) — like their
+        // raw code points pasted from rendered HTML — become plain spaces
+        // the ASCII-only \s in the final match can see (issues #20, #23).
+        // Do NOT swap this for /u on the final match: under PCRE, Unicode \s
+        // covers the family's Zs spaces but not its five Cf format
+        // characters — U+200B/U+200C/U+200D/U+2060/U+FEFF would still slip
+        // through — and it would move separator handling from this
+        // infallible str_replace into PCRE, adding a new failure mode to the
+        // match. Safe order: a single-pass
+        // html_entity_decode never decodes recursively — '&amp;lt;' yields
+        // the literal text '&lt;', not a bracket — and this pipeline decodes
+        // exactly once. Plain str_replace — no PCRE, so no new fail-open
+        // surface. Residuals: (a) an argument made ONLY of brackets and/or
+        // neutralized separators ('!vac &lt;&gt;', '!vac &nbsp;') dissolves
+        // to whitespace, so the command goes unmatched silently — the same
+        // known-silent contract literal '!vac <>' has had since #17 (tracked
+        // in #25); (b) semicolon-less '&nbsp' (no ';') does not decode under
+        // ENT_HTML5 and stays glued to '!vac' as literal text — browsers do
+        // render the legacy no-semicolon form as a space, but handling it
+        // would need an unrelated pre-decode special case; excluded by
+        // maintainer decision (issue #23, known residual).
+        $plain = str_replace(
+            [
+                '<', '>', "\u{00A0}",
+                "\u{2000}", "\u{2001}", "\u{2002}", "\u{2003}", "\u{2004}",
+                "\u{2005}", "\u{2006}", "\u{2007}", "\u{2008}", "\u{2009}",
+                "\u{200A}", "\u{200B}", "\u{200C}", "\u{200D}",
+                "\u{202F}", "\u{205F}", "\u{2060}", "\u{3000}", "\u{FEFF}",
+            ],
+            ' ',
+            html_entity_decode($bbStripped, ENT_QUOTES | ENT_HTML5, 'UTF-8')
+        );
 
         // Final match: the fourth PCRE step, carrying the same fail-open
         // observability as the three strips above. preg_match() returns false on
