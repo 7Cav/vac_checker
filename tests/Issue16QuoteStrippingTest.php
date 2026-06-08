@@ -17,7 +17,11 @@
 
 // ---------------------------------------------------------------------------
 // Spy SteamChecker — stands in for the real class so "a check fired" is
-// observable. Post.php constructs it and calls run() / runManual().
+// observable. Post.php constructs it and calls run() / runManual() /
+// replyDegenerateInvocation() (the #25 usage-reply path; its message bytes
+// are characterized in Issue25DegenerateInvocationTest). The recording
+// replyDegenerateInvocation() also keeps a future degenerate-shaped fixture
+// failing on an assertion instead of a missing-method Error.
 // ---------------------------------------------------------------------------
 
 namespace Cav7\SteamChecker {
@@ -29,6 +33,8 @@ namespace Cav7\SteamChecker {
         public static $runCalls = 0;
         /** @var string[] */
         public static $runManualCalls = [];
+        /** @var int */
+        public static $degenerateReplies = 0;
 
         public function __construct($thread)
         {
@@ -45,11 +51,17 @@ namespace Cav7\SteamChecker {
             self::$runManualCalls[] = $rawSteamId;
         }
 
+        public function replyDegenerateInvocation(): void
+        {
+            self::$degenerateReplies++;
+        }
+
         public static function reset(): void
         {
             self::$constructed = [];
             self::$runCalls = 0;
             self::$runManualCalls = [];
+            self::$degenerateReplies = 0;
         }
     }
 }
@@ -569,6 +581,14 @@ namespace {
     // unchanged (false is treated as no command, as it always was); the guard
     // adds exactly ONE [Cav7/SteamChecker] '!vac match' PCRE error so the
     // failure is observable instead of being swallowed silently.
+    //
+    // Second role since #25: this fixture ('!vac' + trailing whitespace) is
+    // degenerate-SHAPED, so a primary-match PCRE failure must ALSO suppress
+    // the trailing-token rule — the parse state is unknown and a usage reply
+    // would mislabel a possibly-real command. The no-degenerate-reply /
+    // no-construction assertions below are the only behavioral guard of
+    // Post.php's `=== 0` gate (delete the gate and this case posts the
+    // usage reply).
     $resetOptions();
     $matchBombPost = $makePost(['message' => '!vac' . str_repeat(' ', 5000)]);
     $withPcreLimits(['pcre.backtrack_limit' => 1], function () use ($invoke, $matchBombPost) {
@@ -579,6 +599,10 @@ namespace {
         $manuals === [] && \Cav7\SteamChecker\SteamChecker::$constructed === []);
     $check('PCRE fail-open: final !vac-match null logs one [Cav7/SteamChecker] match PCRE error',
         count($pcreGuardErrors('!vac match')) === 1);
+    $check('PCRE fail-open: primary-match failure suppresses the trailing-token rule'
+        . ' (no degenerate reply, no construction — the `=== 0` gate, issue #25)',
+        \Cav7\SteamChecker\SteamChecker::$degenerateReplies === 0
+        && \Cav7\SteamChecker\SteamChecker::$constructed === []);
 
     // -----------------------------------------------------------------------
     // AC6: permission/routing gates — characterization, behavior unchanged.

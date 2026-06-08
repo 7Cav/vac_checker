@@ -24,7 +24,11 @@
 
 // ---------------------------------------------------------------------------
 // Spy SteamChecker — stands in for the real class so "a check fired" is
-// observable. Post.php constructs it and calls run() / runManual().
+// observable. Post.php constructs it and calls run() / runManual() /
+// replyDegenerateInvocation() (the #25 usage-reply path; its message bytes
+// are characterized in Issue25DegenerateInvocationTest). The recording
+// replyDegenerateInvocation() also keeps a future degenerate-shaped fixture
+// failing on an assertion instead of a missing-method Error.
 // ---------------------------------------------------------------------------
 
 namespace Cav7\SteamChecker {
@@ -36,6 +40,8 @@ namespace Cav7\SteamChecker {
         public static $runCalls = 0;
         /** @var string[] */
         public static $runManualCalls = [];
+        /** @var int */
+        public static $degenerateReplies = 0;
 
         public function __construct($thread)
         {
@@ -52,11 +58,17 @@ namespace Cav7\SteamChecker {
             self::$runManualCalls[] = $rawSteamId;
         }
 
+        public function replyDegenerateInvocation(): void
+        {
+            self::$degenerateReplies++;
+        }
+
         public static function reset(): void
         {
             self::$constructed = [];
             self::$runCalls = 0;
             self::$runManualCalls = [];
+            self::$degenerateReplies = 0;
         }
     }
 }

@@ -169,8 +169,10 @@ class Post extends XFCP_Post
         // surface. Residuals: (a) an argument made ONLY of brackets and/or
         // neutralized separators ('!vac &lt;&gt;', '!vac &nbsp;') dissolves
         // to whitespace, so the primary match fails — a degenerate
-        // invocation. Silent from #17 through #24; since #25 the
-        // trailing-token rule below answers it with the usage reply;
+        // invocation. Literal '!vac <>' silent since #17; the entity forms
+        // were loud (unresolvable-ID reply on a garbage token) until
+        // #20/#21 made them dissolve; all silent through #24. Since #25 the
+        // trailing-token rule below answers them with the usage reply;
         // (b) semicolon-less '&nbsp' (no ';') does not decode under
         // ENT_HTML5 and stays glued to '!vac' as literal text — browsers do
         // render the legacy no-semicolon form as a space, but handling it
@@ -178,6 +180,10 @@ class Post extends XFCP_Post
         // maintainer decision (issue #23, known residual). The glued token
         // also keeps the #25 trailing-token rule from firing: the post ends
         // with '!vac&nbsp…', not a standalone '!vac', so it stays silent.
+        // (c) non-neutralized invisibles (e.g. U+2028/U+2029
+        // LINE/PARAGRAPH SEPARATOR, which render as line breaks) glue to
+        // !vac, so both the primary match and the trailing-token rule miss
+        // them — fully silent; family extension tracked in #31.
         $plain = str_replace(
             [
                 '<', '>', "\u{00A0}",

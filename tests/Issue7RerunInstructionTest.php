@@ -147,8 +147,12 @@ namespace {
     // parser strips well-formed [QUOTE] blocks before matching, but unbalanced
     // quote markup fails open to the old flatten-everything behaviour, which
     // yields the token 'your' (the first word after '!vac' in the issue-17
-    // wording; pre-#17 the strip_tags-era token was '.'). Pin that token and
-    // the partial manual copy 'Steam64ID' through the real resolveSteamId(),
+    // wording; pre-#17 the strip_tags-era token was '.'). The #25 usage
+    // reply adds a second flatten token: its lead-in ('No Steam ID was
+    // found in that [ICODE]!vac[/ICODE] command.') BBCode-strips to
+    // '… !vac command.', so an unbalanced quote-reply of THAT reply
+    // first-matches 'command.'. Pin those tokens and the partial manual
+    // copy 'Steam64ID' through the real resolveSteamId(),
     // asserting null AND zero network I/O. A future rewording whose
     // placeholder accidentally matches the vanity-URL pattern would attempt a
     // network call and fail here.
@@ -167,7 +171,7 @@ namespace {
         return [$result, $spy->networkCalls, $threw];
     };
 
-    foreach (['your', 'Steam64ID'] as $token) {
+    foreach (['your', 'Steam64ID', 'command.'] as $token) {
         // resolveSteamShortLink (raw curl, not spied by httpGet) is only
         // reachable when the token contains 's.team/' — guard against that.
         $check("token '$token' does not contain s.team/ (raw-curl shortlink path unreachable)",

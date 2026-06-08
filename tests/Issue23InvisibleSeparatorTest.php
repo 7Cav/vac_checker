@@ -296,9 +296,10 @@ namespace {
     // posted. Same family as the #20 degenerate cases ('!vac &lt;&gt;',
     // '!vac &nbsp;') and literal '!vac <>'. An invisible separator defeats
     // naive bare-"!vac" detection only when it GLUES to a following
-    // argument (see the AC1 cases and the residual below); separator-only
-    // arguments are exactly what the trailing-token rule answers. Reply
-    // bytes are characterized in Issue25DegenerateInvocationTest.
+    // argument (see the AC1 cases and the residual below); in-family
+    // separator-only arguments are exactly what the trailing-token rule
+    // answers (out-of-family ones stay silent, see #31). Reply bytes are
+    // characterized in Issue25DegenerateInvocationTest.
     // -----------------------------------------------------------------------
     $separatorOnly = [
         '"!vac<U+202F>"'                   => '!vac' . mb_chr(0x202F, 'UTF-8'),
@@ -338,6 +339,46 @@ namespace {
         && \Cav7\SteamChecker\SteamChecker::$constructed === []);
     $check('known residual "!vac&nbsp<id>": logs stay clean (silent contract)',
         $logsClean());
+
+    // Standalone variant of the same residual: '!vac&nbsp' alone (no id).
+    // The undecoded '&nbsp' glues to '!vac' as one token, so the primary
+    // match fails AND the post does not end with a standalone '!vac' — the
+    // #25 trailing-token rule skips it too. Fully silent.
+    $resetOptions();
+    $post = $makePost(['message' => '!vac&nbsp']);
+    $invoke($post);
+    $check('known residual standalone "!vac&nbsp" (no id): glued token, fully silent'
+        . ' (no manual, no degenerate reply, no construction)',
+        $manuals() === []
+        && \Cav7\SteamChecker\SteamChecker::$degenerateReplies === 0
+        && \Cav7\SteamChecker\SteamChecker::$constructed === []);
+    $check('known residual standalone "!vac&nbsp": logs stay clean (silent contract)',
+        $logsClean());
+
+    // -----------------------------------------------------------------------
+    // Known-residual characterization (#31): NON-neutralized invisibles —
+    // U+2028 LINE SEPARATOR / U+2029 PARAGRAPH SEPARATOR, which render as
+    // line breaks — are outside the #23 family by maintainer decision
+    // (Post.php residual (c)). Trailing one onto '!vac' (no id) misses BOTH
+    // detections: the invisible glues to '!vac' as one token, so the primary
+    // match's ASCII \s never separates them (primary fails), and the post
+    // then ends with that glued token rather than a standalone '!vac', so
+    // the #25 trailing-token rule skips it too. Fully silent. Pinned so the
+    // documented residual stays honest; extending the family is issue #31.
+    // -----------------------------------------------------------------------
+    foreach ([0x2028 => 'LINE SEPARATOR', 0x2029 => 'PARAGRAPH SEPARATOR'] as $cp => $name) {
+        $label = sprintf('U+%04X %s', $cp, $name);
+        $resetOptions();
+        $post = $makePost(['message' => '!vac' . mb_chr($cp, 'UTF-8')]);
+        $invoke($post);
+        $check("known residual \"!vac<$label>\" (trailing, no id): fully silent"
+            . ' (no manual, no degenerate reply, no construction) — #31',
+            $manuals() === []
+            && \Cav7\SteamChecker\SteamChecker::$degenerateReplies === 0
+            && \Cav7\SteamChecker\SteamChecker::$constructed === []);
+        $check("known residual \"!vac<$label>\": logs stay clean (silent contract)",
+            $logsClean());
+    }
 
     // -----------------------------------------------------------------------
     // Invisible-char-inside-token characterization: a family code point in

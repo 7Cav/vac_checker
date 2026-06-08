@@ -124,6 +124,9 @@ namespace {
 
         public function create($type)
         {
+            if (\XF::$emCreateThrows) {
+                throw new \RuntimeException('entity create failed (forced by test)');
+            }
             return new FakeCreatedPost();
         }
     }
@@ -148,6 +151,8 @@ namespace {
         public static $loggedExceptions = [];
         /** @var string[] message bytes captured from postReply() saves */
         public static $postedMessages = [];
+        /** @var bool when true, FakeEm::create() throws (error-branch tests) */
+        public static $emCreateThrows = false;
 
         public static function options()
         {
@@ -220,6 +225,7 @@ namespace {
         \XF::$loggedErrors = [];
         \XF::$loggedExceptions = [];
         \XF::$postedMessages = [];
+        \XF::$emCreateThrows = false;
     };
 
     $invoke = function ($post) {
@@ -319,6 +325,19 @@ namespace {
         $check("$label: logs stay clean", $logsClean());
     }
 
+    // ACCEPTED-loud characterization: a trailing [ICODE]!vac[/ICODE] — the
+    // bot's own teaching markup — triggers the usage reply too. The BBCode
+    // strip turns both [ICODE] tags into spaces, leaving the token
+    // standalone-trailing, exactly the shape the rule answers. Accepted per
+    // the triage decision: conversational mentions deliberately trigger,
+    // and this is one, merely dressed in the markup the bot itself uses.
+    $resetState();
+    $post = $makePost(['message' => 'see [ICODE]!vac[/ICODE]']);
+    $invoke($post);
+    $check('trailing [ICODE]!vac[/ICODE] (accepted-loud): exact two-line usage reply posted',
+        \XF::$postedMessages === [$expectedUsageReply]);
+    $check('trailing [ICODE]!vac[/ICODE]: logs stay clean', $logsClean());
+
     // -----------------------------------------------------------------------
     // AC4: punctuation-glued mentions stay silent — the token is not
     // standalone, so the trailing-token rule must not fire.
@@ -335,6 +354,19 @@ namespace {
             \XF::$postedMessages === []);
         $check("$label: logs stay clean", $logsClean());
     }
+
+    // Quoted-only trailing mention: a [QUOTE] block whose quoted text ends
+    // in a standalone !vac, with NOTHING typed below it, stays silent — the
+    // step-0 quote strip removes the block before detection. A quote-strip
+    // regression here would otherwise make the bot answer someone else's
+    // words (issue #16's contract, restated for the #25 rule).
+    $resetState();
+    $post = $makePost(['message' =>
+        '[QUOTE="Staff A, post: 200, member: 5"]if the check fails, just use !vac[/QUOTE]']);
+    $invoke($post);
+    $check('quoted-only trailing !vac: nothing posted (quoted words are not this user\'s command)',
+        \XF::$postedMessages === []);
+    $check('quoted-only trailing !vac: logs stay clean', $logsClean());
 
     // -----------------------------------------------------------------------
     // AC5: a !vac with any non-whitespace argument is untouched.
@@ -464,6 +496,61 @@ namespace {
         && strpos($degenerateDebugLines[0], 'post_id=101') !== false);
     $check('debug on: usage reply still posted',
         \XF::$postedMessages === [$expectedUsageReply]);
+
+    // -----------------------------------------------------------------------
+    // AC8: error branches of the reply path.
+    //
+    // (a) try/catch containment: a throw inside replyDegenerateInvocation()
+    // (forced here by making the fake entity manager's create() throw, so
+    // the real postReply() blows up mid-flight) must be caught by Post.php's
+    // wrapper — exactly one logException with the 'degenerate !vac reply
+    // error: ' prefix, and the script continues (no fatal): reaching the
+    // assertions below IS the no-fatal proof.
+    // -----------------------------------------------------------------------
+    $resetState();
+    \XF::$emCreateThrows = true;
+    $post = $makePost(['message' => '!vac']);
+    $invoke($post);
+    $degenerateExceptionLogs = array_values(array_filter(\XF::$loggedExceptions, function ($msg) {
+        return strpos($msg, '[Cav7/SteamChecker] degenerate !vac reply error: ') === 0;
+    }));
+    $check('reply-path throw: exactly one logException with the degenerate-reply prefix',
+        count($degenerateExceptionLogs) === 1
+        && \XF::$loggedExceptions === $degenerateExceptionLogs);
+    $check('reply-path throw: no reply was posted',
+        \XF::$postedMessages === []);
+
+    // -----------------------------------------------------------------------
+    // (b) bot user unconfigured: with steamCheckerBotUserId = 0, the
+    // trailing-token rule still fires, but replyDegenerateInvocation()
+    // refuses at its config check — no reply, one configuration error
+    // logged, no exception.
+    // -----------------------------------------------------------------------
+    $resetState();
+    \XF::$optionsData['steamCheckerBotUserId'] = 0;
+    $post = $makePost(['message' => '!vac']);
+    $invoke($post);
+    $botConfigErrors = array_values(array_filter(\XF::$loggedErrors, function ($msg) {
+        return strpos($msg, 'Bot user ID is not configured.') !== false;
+    }));
+    $check('bot user unconfigured: no reply posted',
+        \XF::$postedMessages === []);
+    $check('bot user unconfigured: the configuration error is logged (and nothing else)',
+        count($botConfigErrors) === 1
+        && \XF::$loggedErrors === $botConfigErrors
+        && \XF::$loggedExceptions === []);
+
+    // -----------------------------------------------------------------------
+    // (c) detection PCRE-failure log branch (preg_match -> false on the
+    // trailing-token pattern): covered by convention, not by fixture. The
+    // pattern follows the exact fail-loud shape of the final-match false
+    // branch — log, treat as no-trigger — and, like that branch, is
+    // exercised nowhere at PHP defaults: /(?:^|\s)!vac\s*$/i has no
+    // backtracking to exhaust under JIT, so no pcre.backtrack_limit fixture
+    // reaches it without the awkward interpreter-mode pre-warm dance.
+    // Mirrors how Issue16QuoteStrippingTest documents its BBCode-strip
+    // guard (its case (c)) instead of forcing an unreachable branch.
+    // -----------------------------------------------------------------------
 
     echo "\n" . ($failures === 0
         ? "All checks passed.\n"

@@ -27,6 +27,6 @@ _Avoid_: no-arg command, empty command
 
 **Trailing-token rule**:
 The trigger condition for responding to a degenerate invocation: fires only
-after the primary `!vac` match fails AND the normalized post ends with a
-standalone `!vac`. Conversational mentions that end a post ("just use !vac")
+after the primary `!vac` match finds a genuine no-match (a PCRE error there
+suppresses the rule) AND the normalized post ends with a standalone `!vac`. Conversational mentions that end a post ("just use !vac")
 deliberately trigger it; punctuation-glued mentions ("use !vac.") do not.
