@@ -6,8 +6,11 @@
  * #20: the final match's `\s` is ASCII-only (no /u), so a U+00A0 NO-BREAK
  * SPACE separator — pasted raw from rendered HTML, or produced by the
  * decode step from `&nbsp;` — silently dropped the command (no check, no
- * reply, no log). Fix: neutralize U+00A0 to a regular space alongside the
- * angle brackets, applied to the DECODED string.
+ * reply, no log). Fix: neutralize U+00A0 to a regular space, applied to the
+ * DECODED string. (Since #31 the family neutralizes via a NUL sentinel + a
+ * PCRE heal step, not directly to a space; net behavior for U+00A0 — a
+ * separator that ends up as a space the final ASCII \s sees — is unchanged,
+ * so these assertions stay valid. See ADR-0001.)
  *
  * #21: bracket neutralization formerly ran BEFORE html_entity_decode, so
  * entity-encoded brackets (`&lt;`/`&gt;`/`&#60;`…) escaped it — the decode
@@ -16,7 +19,8 @@
  * brackets become whitespace exactly like literal ones (#17 contract:
  * brackets become whitespace, never token characters).
  *
- * Both fixed by one plain str_replace on the decoded string — no new PCRE,
+ * Both fixed by neutralizing the decoded string (originally one plain
+ * str_replace; since #31 a NUL-sentinel str_replace + heal — see ADR-0001),
  * preserving the "every step either cannot fail or fails loudly" property.
  *
  * Self-contained: predefines a stub XFCP_Post proxy base class and a spy

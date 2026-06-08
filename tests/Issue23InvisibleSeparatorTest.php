@@ -17,12 +17,22 @@
  * cannot fail or fails loudly" property. /u on the final match is NOT a
  * substitute: Unicode \s covers the family's Zs spaces but not its five Cf
  * format characters (U+200B/U+200C/U+200D/U+2060/U+FEFF), and it adds a
- * PCRE failure mode.
+ * PCRE failure mode. (This Zs-vs-Cf framing is scoped to #23's subset; see
+ * #31 / ADR-0001 for the full Zs/Zl/Zp/Cf picture, incl. the PCRE2 U+180E
+ * quirk where Unicode \s does cover one Cf member.)
  *
  * Entity forms (&thinsp;, &numsp;, &emsp;, &MediumSpace;, &NoBreak;,
  * &ZeroWidthSpace;) are covered for free because the neutralization runs
  * AFTER the single entity decode — pinned here so a pipeline reorder that
  * breaks the free coverage fails this test.
+ *
+ * Issue #31 (ADR-0001) later closed the family by category: the needle list
+ * is now every Zs/Zl/Zp/Cf code point at Unicode 16.0 minus U+0020 (188
+ * entries, generated once and pasted) plus the #17 brackets. The
+ * family-closure section below samples the post-#23 members — incl. bidi
+ * embedding controls and an astral tag character — in both shapes
+ * (glued-with-id, trailing-no-id) and flips the former #31 known-residual
+ * pins to loud.
  *
  * Self-contained: predefines a stub XFCP_Post proxy base class and a spy
  * \Cav7\SteamChecker\SteamChecker (the real SteamChecker.php is never loaded)
@@ -203,7 +213,9 @@ namespace {
 
     // The invisible-separator family pinned by issue #23 (exact code-point
     // list from the agent brief): U+2000–U+200D, U+202F, U+205F, U+2060,
-    // U+3000, U+FEFF.
+    // U+3000, U+FEFF. This is the historical #23 discovery subset; the
+    // post-#23 members of the full ADR-0001 family are sampled in the
+    // family-closure section below (#31).
     $invisibles = [
         0x2000 => 'EN QUAD',
         0x2001 => 'EM QUAD',
@@ -298,7 +310,9 @@ namespace {
     // naive bare-"!vac" detection only when it GLUES to a following
     // argument (see the AC1 cases and the residual below); in-family
     // separator-only arguments are exactly what the trailing-token rule
-    // answers (out-of-family ones stay silent, see #31). Reply bytes are
+    // answers (since #31 "in-family" is the whole Zs/Zl/Zp/Cf set —
+    // out-of-scope render-blank look-alikes stay silent, see ADR-0001 and
+    // .out-of-scope/render-blank-characters.md). Reply bytes are
     // characterized in Issue25DegenerateInvocationTest.
     // -----------------------------------------------------------------------
     $separatorOnly = [
@@ -356,28 +370,209 @@ namespace {
         $logsClean());
 
     // -----------------------------------------------------------------------
-    // Known-residual characterization (#31): NON-neutralized invisibles —
-    // U+2028 LINE SEPARATOR / U+2029 PARAGRAPH SEPARATOR, which render as
-    // line breaks — are outside the #23 family by maintainer decision
-    // (Post.php residual (c)). Trailing one onto '!vac' (no id) misses BOTH
-    // detections: the invisible glues to '!vac' as one token, so the primary
-    // match's ASCII \s never separates them (primary fails), and the post
-    // then ends with that glued token rather than a standalone '!vac', so
-    // the #25 trailing-token rule skips it too. Fully silent. Pinned so the
-    // documented residual stays honest; extending the family is issue #31.
+    // Known-residual characterization: semicolon-less '&shy' (no ';'), the
+    // soft-hyphen sibling of '&nbsp'. Widening the family to U+00AD (#31) made
+    // '&shy;' (WITH ';') decode to the in-family U+00AD and neutralize like
+    // any separator — but the legacy no-semicolon form '&shy' still does NOT
+    // decode under ENT_HTML5: it stays glued to '!vac' as literal text, the
+    // bytes never become the U+00AD code point, so the family str_replace
+    // never sees it. Same residual-(b) MECHANISM as '&nbsp' (entity decoding,
+    // not a raw code point) and the same standing maintainer exclusion (#23).
+    // Behavior is UNCHANGED by #31 — pinned here, mirroring the '&nbsp' pins
+    // above, so the documented residual stays honest.
     // -----------------------------------------------------------------------
-    foreach ([0x2028 => 'LINE SEPARATOR', 0x2029 => 'PARAGRAPH SEPARATOR'] as $cp => $name) {
+    $resetOptions();
+    $post = $makePost(['message' => '!vac&shy' . $realId]);
+    $invoke($post);
+    $check('known residual "!vac&shy<id>" (no semicolon): stays glued, no check fires, no usage reply',
+        $manuals() === []
+        && \Cav7\SteamChecker\SteamChecker::$degenerateReplies === 0
+        && \Cav7\SteamChecker\SteamChecker::$constructed === []);
+    $check('known residual "!vac&shy<id>": logs stay clean (silent contract)',
+        $logsClean());
+
+    // Standalone variant: '!vac&shy' alone (no id). The undecoded '&shy'
+    // glues to '!vac' as one token, so the primary match fails AND the post
+    // does not end with a standalone '!vac' — the #25 trailing-token rule
+    // skips it too. Fully silent.
+    $resetOptions();
+    $post = $makePost(['message' => '!vac&shy']);
+    $invoke($post);
+    $check('known residual standalone "!vac&shy" (no id): glued token, fully silent'
+        . ' (no manual, no degenerate reply, no construction)',
+        $manuals() === []
+        && \Cav7\SteamChecker\SteamChecker::$degenerateReplies === 0
+        && \Cav7\SteamChecker\SteamChecker::$constructed === []);
+    $check('known residual standalone "!vac&shy": logs stay clean (silent contract)',
+        $logsClean());
+
+    // Contrast pin: the semicolon-TERMINATED '&shy;' DOES decode to the
+    // in-family U+00AD and is neutralized — '!vac&shy;<id>' fires on the id
+    // exactly like a raw separator. This is what makes '&shy' (no ';') a
+    // residual rather than in-family: only the decoding boundary differs.
+    $resetOptions();
+    $post = $makePost(['message' => '!vac&shy;' . $realId]);
+    $invoke($post);
+    $check('contrast "!vac&shy;<id>" (with semicolon): decodes to U+00AD, fires with the bare id (#31)',
+        $manuals() === [$realId]);
+    $check('contrast "!vac&shy;<id>": logs stay clean', $logsClean());
+
+    // -----------------------------------------------------------------------
+    // Family closure (issue #31, ADR-0001): the needle list is no longer the
+    // #23 discovery set but the full separator/format-control family — every
+    // Zs/Zl/Zp/Cf code point at Unicode 16.0 minus U+0020. Sampled members
+    // beyond the #23 list — soft hyphen, Ogham space mark, Mongolian vowel
+    // separator, LRM/RLM, line/paragraph separators, two bidi embedding
+    // controls, and an astral tag character (pins that multibyte AND astral
+    // needles actually work in the byte-oriented str_replace) — must behave
+    // exactly like the #23 members. Two shapes each:
+    //   glued-with-id  "!vac<C><id>" -> C separates; the check fires on the id
+    //   trailing-no-id "!vac<C>"     -> degenerate invocation -> usage reply
+    //                                   via the #25 trailing-token rule
+    // The trailing U+2028/U+2029 cases FLIP the former #31 known-residual
+    // pins (fully-silent characterization) to loud — scenarios retained,
+    // expectations inverted, per the #31 brief.
+    // -----------------------------------------------------------------------
+    $familyClosure = [
+        0x00AD  => 'SOFT HYPHEN',
+        0x1680  => 'OGHAM SPACE MARK',
+        0x180E  => 'MONGOLIAN VOWEL SEPARATOR',
+        0x200E  => 'LEFT-TO-RIGHT MARK',
+        0x200F  => 'RIGHT-TO-LEFT MARK',
+        0x2028  => 'LINE SEPARATOR',
+        0x2029  => 'PARAGRAPH SEPARATOR',
+        0x202A  => 'LEFT-TO-RIGHT EMBEDDING',
+        0x202E  => 'RIGHT-TO-LEFT OVERRIDE',
+        0xE0041 => 'TAG LATIN CAPITAL LETTER A',
+    ];
+    foreach ($familyClosure as $cp => $name) {
         $label = sprintf('U+%04X %s', $cp, $name);
+
+        // Shape 1: glued-with-id — the member acts as a separator.
+        $resetOptions();
+        $post = $makePost(['message' => '!vac' . mb_chr($cp, 'UTF-8') . $realId]);
+        $invoke($post);
+        $check("family closure $label glued-with-id: exactly one check fires with the bare id (#31)",
+            $manuals() === [$realId]);
+        $check("family closure $label glued-with-id: logs stay clean", $logsClean());
+
+        // Shape 2: trailing-no-id — the member dissolves, the post ends with
+        // a standalone !vac, the #25 trailing-token rule answers.
         $resetOptions();
         $post = $makePost(['message' => '!vac' . mb_chr($cp, 'UTF-8')]);
         $invoke($post);
-        $check("known residual \"!vac<$label>\" (trailing, no id): fully silent"
-            . ' (no manual, no degenerate reply, no construction) — #31',
+        $check("family closure $label trailing-no-id: no check, exactly one usage reply (#31)",
+            $manuals() === []
+            && \Cav7\SteamChecker\SteamChecker::$degenerateReplies === 1
+            && count(\Cav7\SteamChecker\SteamChecker::$constructed) === 1);
+        $check("family closure $label trailing-no-id: logs stay clean", $logsClean());
+    }
+
+    // -----------------------------------------------------------------------
+    // Literal-interior closure (issue #31, sentinel+heal): a family code
+    // point INSIDE the '!vac' literal itself ('!v<C>ac', '!<C>vac',
+    // '!va<C>c') formerly broke the literal — every needle neutralized to a
+    // space, so the post read '!v ac <id>' and the final ASCII match never
+    // saw a '!vac' token: fully silent (no check, no usage reply, no log).
+    // The fix neutralizes the family to a NUL SENTINEL instead of a space,
+    // heals '!\x00*v\x00*a\x00*c' back to '!vac' with an ASCII-only PCRE
+    // step, then maps the remaining sentinels (true separators) to spaces.
+    // So an interior in-family char now heals away and the command fires.
+    // Two shapes per position:
+    //   glued-with-id  "!v<C>ac <id>" -> heals -> the check fires on the id
+    //   trailing-no-id "!v<C>ac"      -> heals to bare !vac -> usage reply
+    //                                    via the #25 trailing-token rule
+    // -----------------------------------------------------------------------
+    $interiorChars = [
+        0x00AD  => 'SOFT HYPHEN',
+        0x200B  => 'ZERO WIDTH SPACE',
+        0x2028  => 'LINE SEPARATOR',
+        0xE0041 => 'TAG LATIN CAPITAL LETTER A (astral)',
+    ];
+    foreach ($interiorChars as $cp => $name) {
+        $C = mb_chr($cp, 'UTF-8');
+        $label = sprintf('U+%04X %s', $cp, $name);
+        $positions = [
+            '!v<C>ac' => '!v' . $C . 'ac',
+            '!<C>vac' => '!' . $C . 'vac',
+            '!va<C>c' => '!va' . $C . 'c',
+        ];
+        foreach ($positions as $shape => $broken) {
+            // Shape 1: glued-with-id — the literal heals, then a real space
+            // separates the id, so the check fires on the bare id.
+            $resetOptions();
+            $post = $makePost(['message' => $broken . ' ' . $realId]);
+            $invoke($post);
+            $check("interior $label $shape <id>: heals, exactly one check fires with the bare id (#31)",
+                $manuals() === [$realId]);
+            $check("interior $label $shape <id>: logs stay clean", $logsClean());
+
+            // Shape 2: trailing-no-id — the literal heals to a standalone
+            // !vac, so the #25 trailing-token rule answers with the usage
+            // reply (NOT a check, NOT silence).
+            $resetOptions();
+            $post = $makePost(['message' => $broken]);
+            $invoke($post);
+            $check("interior $label $shape trailing: no check, exactly one usage reply (#31)",
+                $manuals() === []
+                && \Cav7\SteamChecker\SteamChecker::$degenerateReplies === 1
+                && count(\Cav7\SteamChecker\SteamChecker::$constructed) === 1);
+            $check("interior $label $shape trailing: logs stay clean", $logsClean());
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Stacked-interior closure (issue #31, sentinel+heal): MULTIPLE family
+    // chars in one interior gap, and a char in EVERY gap, must still heal.
+    // This pins the heal's '\x00*' (zero-or-MORE) quantifier semantics: two
+    // sentinels in a single gap ('!v<C1><C2>ac' -> '!v<NUL><NUL>ac') only heal
+    // if the run is matched greedily as a group, not a single optional NUL;
+    // a char in every gap ('!<C>v<C>a<C>c') exercises all three '\x00*' runs at
+    // once. Were the quantifier '\x00' (exactly one) instead of '\x00*', the
+    // two-in-one-gap case would NOT heal and would go silent — so this case
+    // would FAIL, which is the point of pinning it.
+    $C1 = mb_chr(0x00AD, 'UTF-8'); // SOFT HYPHEN
+    $C2 = mb_chr(0x200B, 'UTF-8'); // ZERO WIDTH SPACE
+
+    // Two family chars in ONE interior gap, glued-with-id: heals on the id.
+    $resetOptions();
+    $post = $makePost(['message' => '!v' . $C1 . $C2 . 'ac ' . $realId]);
+    $invoke($post);
+    $check('stacked interior "!v<U+00AD><U+200B>ac <id>": two sentinels in one gap heal, fires on the bare id (#31)',
+        $manuals() === [$realId]);
+    $check('stacked interior two-in-one-gap: logs stay clean', $logsClean());
+
+    // A family char in EVERY interior gap, glued-with-id: heals on the id.
+    $resetOptions();
+    $post = $makePost(['message' => '!' . $C1 . 'v' . $C1 . 'a' . $C1 . 'c ' . $realId]);
+    $invoke($post);
+    $check('stacked interior "!<C>v<C>a<C>c <id>": a char in every gap heals, fires on the bare id (#31)',
+        $manuals() === [$realId]);
+    $check('stacked interior char-in-every-gap: logs stay clean', $logsClean());
+
+    // -----------------------------------------------------------------------
+    // False-positive guards (issue #31): the heal repairs ONLY family
+    // sentinels glued between the literal's letters — never TYPED spaces. So
+    // real conversational traffic in this VAC community ("lol! VAC banned
+    // him", "got a ! VAC ban") and a spaced-out "! v a c" must stay SILENT:
+    // no check, no usage reply, no construction. Pinned as a characterization
+    // so a future regression to a flexible '!\s*v\s*a\s*c' match — which
+    // WOULD false-fire on these — is caught here.
+    // -----------------------------------------------------------------------
+    $falsePositiveGuards = [
+        'lol! VAC banned him' => 'lol! VAC banned him',
+        '! v a c team'        => '! v a c team',
+        'got a ! VAC ban'     => 'got a ! VAC ban',
+    ];
+    foreach ($falsePositiveGuards as $label => $message) {
+        $resetOptions();
+        $post = $makePost(['message' => $message]);
+        $invoke($post);
+        $check("false-positive guard \"$label\": stays silent (no check, no usage reply, no construction)",
             $manuals() === []
             && \Cav7\SteamChecker\SteamChecker::$degenerateReplies === 0
             && \Cav7\SteamChecker\SteamChecker::$constructed === []);
-        $check("known residual \"!vac<$label>\": logs stay clean (silent contract)",
-            $logsClean());
+        $check("false-positive guard \"$label\": logs stay clean", $logsClean());
     }
 
     // -----------------------------------------------------------------------
