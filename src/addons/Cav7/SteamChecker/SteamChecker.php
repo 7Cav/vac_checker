@@ -176,6 +176,26 @@ class SteamChecker
         $this->postReply($this->buildBanReportMessage($steamId64, $banData, $personaName));
     }
 
+    /**
+     * Reply for a degenerate invocation (issue #25): the staffer attempted
+     * !vac but no argument survived normalization — the trailing-token rule
+     * in Post.php fired. Posts the two-line usage reply (lead-in + the
+     * single-sourced re-run instruction). No Steam API interaction happens
+     * on this path, so only the bot user is required, not the API key.
+     */
+    public function replyDegenerateInvocation(): void
+    {
+        $this->debug('SteamChecker::replyDegenerateInvocation() for thread '
+            . $this->thread->thread_id);
+
+        if (!$this->botUserId) {
+            \XF::logError('[Cav7/SteamChecker] Bot user ID is not configured.');
+            return;
+        }
+
+        $this->postReply($this->buildDegenerateInvocationMessage());
+    }
+
     // -------------------------------------------------------------------------
     // Post-body parsing
     // -------------------------------------------------------------------------
@@ -589,6 +609,17 @@ class SteamChecker
             '[COLOR=rgb(184, 49, 47)][B]⚠️ Steam API error — could not complete the ban check. Manual check required.[/B][/COLOR]',
             $this->buildRerunInstructionLine(),
         ]);
+    }
+
+    /**
+     * Two-line usage reply for a degenerate invocation (issue #25): a
+     * hardcoded lead-in plus the re-run instruction taken verbatim from its
+     * single source below — never fork a near-duplicate of that string.
+     */
+    protected function buildDegenerateInvocationMessage(): string
+    {
+        return 'No Steam ID was found in that [ICODE]!vac[/ICODE] command.'
+            . "\n" . $this->buildRerunInstructionLine();
     }
 
     /**

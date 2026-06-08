@@ -38,7 +38,9 @@
 
 // ---------------------------------------------------------------------------
 // Spy SteamChecker — stands in for the real class so "a check fired" is
-// observable. Post.php constructs it and calls run() / runManual().
+// observable. Post.php constructs it and calls run() / runManual() /
+// replyDegenerateInvocation() (the #25 usage-reply path; its message bytes
+// are characterized in Issue25DegenerateInvocationTest).
 // ---------------------------------------------------------------------------
 
 namespace Cav7\SteamChecker {
@@ -50,6 +52,8 @@ namespace Cav7\SteamChecker {
         public static $runCalls = 0;
         /** @var string[] */
         public static $runManualCalls = [];
+        /** @var int */
+        public static $degenerateReplies = 0;
 
         public function __construct($thread)
         {
@@ -66,11 +70,17 @@ namespace Cav7\SteamChecker {
             self::$runManualCalls[] = $rawSteamId;
         }
 
+        public function replyDegenerateInvocation(): void
+        {
+            self::$degenerateReplies++;
+        }
+
         public static function reset(): void
         {
             self::$constructed = [];
             self::$runCalls = 0;
             self::$runManualCalls = [];
+            self::$degenerateReplies = 0;
         }
     }
 }
@@ -277,14 +287,19 @@ namespace {
     $check('regression plain space: logs stay clean', $logsClean());
 
     // -----------------------------------------------------------------------
-    // Degenerate-argument characterization: "!vac" followed by ONLY invisible
-    // characters dissolves entirely to whitespace under the neutralization,
-    // so the command goes unmatched — NO check fires, NO reply is sent, and
-    // nothing is logged. Deliberate, characterized contract: consistent with
-    // the #20 degenerate cases ('!vac &lt;&gt;', '!vac &nbsp;') and literal
-    // '!vac <>' (known-silent since #17). Follow-up tracked in #25 — note an
-    // invisible separator defeats naive bare-"!vac" no-argument detection,
-    // which is why this stays pinned here.
+    // Degenerate-invocation contract (flipped by #25): "!vac" followed by
+    // ONLY invisible characters dissolves entirely to whitespace under the
+    // neutralization, so the primary match fails — and because the
+    // neutralization runs BEFORE the trailing-token detection, the
+    // normalized post ends with a standalone !vac and the rule fires: NO
+    // check runs, but the usage reply (lead-in + re-run instruction) IS
+    // posted. Same family as the #20 degenerate cases ('!vac &lt;&gt;',
+    // '!vac &nbsp;') and literal '!vac <>'. An invisible separator defeats
+    // naive bare-"!vac" detection only when it GLUES to a following
+    // argument (see the AC1 cases and the residual below); in-family
+    // separator-only arguments are exactly what the trailing-token rule
+    // answers (out-of-family ones stay silent, see #31). Reply bytes are
+    // characterized in Issue25DegenerateInvocationTest.
     // -----------------------------------------------------------------------
     $separatorOnly = [
         '"!vac<U+202F>"'                   => '!vac' . mb_chr(0x202F, 'UTF-8'),
@@ -295,29 +310,75 @@ namespace {
         $resetOptions();
         $post = $makePost(['message' => $message]);
         $invoke($post);
-        $check("degenerate $label: no check fires and no reply is sent",
+        $check("degenerate $label: no check fires, exactly one usage reply (#25)",
             $manuals() === []
-            && \Cav7\SteamChecker\SteamChecker::$constructed === []);
-        $check("degenerate $label: logs stay clean (silent contract)",
+            && \Cav7\SteamChecker\SteamChecker::$degenerateReplies === 1
+            && count(\Cav7\SteamChecker\SteamChecker::$constructed) === 1);
+        $check("degenerate $label: logs stay clean",
             $logsClean());
     }
 
     // -----------------------------------------------------------------------
     // Known-residual characterization: semicolon-less '&nbsp' (no ';') does
     // NOT decode under ENT_HTML5, stays glued to '!vac' as literal text, and
-    // the command goes unmatched silently. Excluded by maintainer decision
-    // (issue #23 out-of-scope; documented as residual (b) in Post.php) —
-    // pinned here so the documented residual stays honest against future
-    // entity-decode changes.
+    // the command goes unmatched silently. The #25 trailing-token rule does
+    // NOT fire either: '!vac&nbsp<id>' normalizes to ONE glued token, so the
+    // post ends with that token, not with a standalone '!vac' — this is a
+    // GLUED token (the #23 family), not a degenerate invocation, and the
+    // silence persists post-#25. Excluded by maintainer decision (issue #23
+    // out-of-scope; documented as residual (b) in Post.php) — pinned here so
+    // the documented residual stays honest against future entity-decode or
+    // detection changes.
     // -----------------------------------------------------------------------
     $resetOptions();
     $post = $makePost(['message' => '!vac&nbsp' . $realId]);
     $invoke($post);
-    $check('known residual "!vac&nbsp<id>" (no semicolon): stays glued, no check fires',
+    $check('known residual "!vac&nbsp<id>" (no semicolon): stays glued, no check fires, no usage reply',
         $manuals() === []
+        && \Cav7\SteamChecker\SteamChecker::$degenerateReplies === 0
         && \Cav7\SteamChecker\SteamChecker::$constructed === []);
     $check('known residual "!vac&nbsp<id>": logs stay clean (silent contract)',
         $logsClean());
+
+    // Standalone variant of the same residual: '!vac&nbsp' alone (no id).
+    // The undecoded '&nbsp' glues to '!vac' as one token, so the primary
+    // match fails AND the post does not end with a standalone '!vac' — the
+    // #25 trailing-token rule skips it too. Fully silent.
+    $resetOptions();
+    $post = $makePost(['message' => '!vac&nbsp']);
+    $invoke($post);
+    $check('known residual standalone "!vac&nbsp" (no id): glued token, fully silent'
+        . ' (no manual, no degenerate reply, no construction)',
+        $manuals() === []
+        && \Cav7\SteamChecker\SteamChecker::$degenerateReplies === 0
+        && \Cav7\SteamChecker\SteamChecker::$constructed === []);
+    $check('known residual standalone "!vac&nbsp": logs stay clean (silent contract)',
+        $logsClean());
+
+    // -----------------------------------------------------------------------
+    // Known-residual characterization (#31): NON-neutralized invisibles —
+    // U+2028 LINE SEPARATOR / U+2029 PARAGRAPH SEPARATOR, which render as
+    // line breaks — are outside the #23 family by maintainer decision
+    // (Post.php residual (c)). Trailing one onto '!vac' (no id) misses BOTH
+    // detections: the invisible glues to '!vac' as one token, so the primary
+    // match's ASCII \s never separates them (primary fails), and the post
+    // then ends with that glued token rather than a standalone '!vac', so
+    // the #25 trailing-token rule skips it too. Fully silent. Pinned so the
+    // documented residual stays honest; extending the family is issue #31.
+    // -----------------------------------------------------------------------
+    foreach ([0x2028 => 'LINE SEPARATOR', 0x2029 => 'PARAGRAPH SEPARATOR'] as $cp => $name) {
+        $label = sprintf('U+%04X %s', $cp, $name);
+        $resetOptions();
+        $post = $makePost(['message' => '!vac' . mb_chr($cp, 'UTF-8')]);
+        $invoke($post);
+        $check("known residual \"!vac<$label>\" (trailing, no id): fully silent"
+            . ' (no manual, no degenerate reply, no construction) — #31',
+            $manuals() === []
+            && \Cav7\SteamChecker\SteamChecker::$degenerateReplies === 0
+            && \Cav7\SteamChecker\SteamChecker::$constructed === []);
+        $check("known residual \"!vac<$label>\": logs stay clean (silent contract)",
+            $logsClean());
+    }
 
     // -----------------------------------------------------------------------
     // Invisible-char-inside-token characterization: a family code point in

@@ -24,7 +24,11 @@
 
 // ---------------------------------------------------------------------------
 // Spy SteamChecker — stands in for the real class so "a check fired" is
-// observable. Post.php constructs it and calls run() / runManual().
+// observable. Post.php constructs it and calls run() / runManual() /
+// replyDegenerateInvocation() (the #25 usage-reply path; its message bytes
+// are characterized in Issue25DegenerateInvocationTest). The recording
+// replyDegenerateInvocation() also keeps a future degenerate-shaped fixture
+// failing on an assertion instead of a missing-method Error.
 // ---------------------------------------------------------------------------
 
 namespace Cav7\SteamChecker {
@@ -36,6 +40,8 @@ namespace Cav7\SteamChecker {
         public static $runCalls = 0;
         /** @var string[] */
         public static $runManualCalls = [];
+        /** @var int */
+        public static $degenerateReplies = 0;
 
         public function __construct($thread)
         {
@@ -52,11 +58,17 @@ namespace Cav7\SteamChecker {
             self::$runManualCalls[] = $rawSteamId;
         }
 
+        public function replyDegenerateInvocation(): void
+        {
+            self::$degenerateReplies++;
+        }
+
         public static function reset(): void
         {
             self::$constructed = [];
             self::$runCalls = 0;
             self::$runManualCalls = [];
+            self::$degenerateReplies = 0;
         }
     }
 }
@@ -241,11 +253,12 @@ namespace {
     // AC3: neutralization must never DELETE the command or its surrounding
     // text the way strip_tags did — text formerly inside a closed '<…>' span
     // no longer disappears, and a command inside such a span now fires.
-    // (Residual, post-#20/#21/#23: an ARGUMENT made only of brackets or
-    // neutralized separators can still dissolve to whitespace and go
-    // unmatched — carved out in Post.php, characterized in
-    // Issue20NbspEntityBracketTest / Issue23InvisibleSeparatorTest, and
-    // tracked in #25.)
+    // (Post-#25: an ARGUMENT made only of brackets or neutralized separators
+    // still dissolves to whitespace and the primary match fails, but that
+    // degenerate invocation now gets the usage reply via the trailing-token
+    // rule instead of going silent — documented in Post.php, characterized
+    // in Issue20NbspEntityBracketTest / Issue23InvisibleSeparatorTest /
+    // Issue25DegenerateInvocationTest.)
     // -----------------------------------------------------------------------
     $resetOptions();
     $post = $makePost(['message' => '<!vac ' . $realId . '>']);
