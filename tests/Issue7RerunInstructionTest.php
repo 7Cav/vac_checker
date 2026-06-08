@@ -204,6 +204,11 @@ namespace {
     // because it never affects the captured token. BOTH fixtures below route
     // through this one closure — there must never be a second inline copy. If
     // Post.php changes, update this closure and re-pin.
+    //
+    // The pin is MECHANIZED (issue #22): the assertions right after this
+    // closure verify each load-bearing transform expression appears verbatim
+    // in both this replica and Post.php, so drift fails the test instead of
+    // relying on reviewer memory.
     // ------------------------------------------------------------------------
     $commandPipeline = function (string $storedMessage): ?string {
         $message = $storedMessage;
@@ -239,6 +244,124 @@ namespace {
         }
         return trim($m[1]);
     };
+
+    // ------------------------------------------------------------------------
+    // Mechanized BYTE-SYNC PIN (issue #22).
+    //
+    // Each load-bearing transform expression of the pipeline is listed once
+    // below (as a nowdoc, so the bytes are literal) and asserted verbatim
+    // against BOTH sources of truth:
+    //   1. the $commandPipeline replica above (its source is sliced out of
+    //      the file ReflectionFunction reports, via its line numbers), and
+    //   2. src/addons/Cav7/SteamChecker/XF/Entity/Post.php.
+    // Comments are stripped from both before matching (token_get_all, same
+    // technique as AC7 in Issue17AngleBracketTest), so a doc comment quoting
+    // an old expression can never keep a stale pin green.
+    //
+    // If either side changes, the corresponding check fails and names the
+    // BYTE-SYNC PIN: re-sync the replica closure, then update the pin list.
+    //
+    // Guards on the mechanism itself: the replica slice must contain the
+    // closure signature, the entity file must exist (one clear "missing"
+    // failure instead of eight misleading "pipeline changed?" ones), the pin
+    // count is pinned, and every pin body must be non-trivial — strpos with
+    // an empty needle matches any haystack.
+    //
+    // The quote-strip pin is the FULL multi-line preg_replace call, including
+    // leading indentation: the call bytes are identical in both files (the
+    // replica deliberately mirrors Post.php's indentation), and pinning the
+    // whole call catches drift in the replacement string / flags / count
+    // variable, not just the pattern.
+    // ------------------------------------------------------------------------
+    $pins = [
+        'quote-strip preg_replace call' => <<<'PIN'
+            $stripped = preg_replace(
+                '/\[QUOTE(?:=[^\]]*)?\](?:[^\[]++|\[(?!QUOTE|\/QUOTE\]))*+\[\/QUOTE\]/i',
+                '',
+                $message,
+                -1,
+                $quoteCount
+            );
+PIN,
+        'quote-strip loop guard' => <<<'PIN'
+} while ($quoteCount > 0);
+PIN,
+        '[URL]-unwrap expression' => <<<'PIN'
+$unwrapped = preg_replace('/\[URL[^\]]*\](.*?)\[\/URL\]/is', '$1', $message);
+PIN,
+        '[URL]-unwrap fail-open fallback' => <<<'PIN'
+$unwrapped = $message;
+PIN,
+        'BBCode-strip expression' => <<<'PIN'
+$bbStripped = preg_replace('/\[[^\]]*\]/', ' ', $plain);
+PIN,
+        'BBCode-strip fail-open fallback' => <<<'PIN'
+$bbStripped = $plain;
+PIN,
+        'neutralize/decode line' => <<<'PIN'
+$plain = str_replace(['<', '>', "\u{00A0}"], ' ', html_entity_decode($bbStripped, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+PIN,
+        'final !vac match expression' => <<<'PIN'
+preg_match('/!vac\s+(\S+)/i', $plain, $m)
+PIN,
+    ];
+
+    // Source bytes with comments removed (code + whitespace only).
+    $codeOnly = function (string $phpSource): string {
+        $code = '';
+        foreach (token_get_all($phpSource) as $token) {
+            if (is_array($token)) {
+                if ($token[0] === T_COMMENT || $token[0] === T_DOC_COMMENT) {
+                    continue;
+                }
+                $code .= $token[1];
+            } else {
+                $code .= $token;
+            }
+        }
+        return $code;
+    };
+
+    $replicaRef    = new \ReflectionFunction($commandPipeline);
+    $replicaLines  = (array) file($replicaRef->getFileName());
+    $replicaSource = $codeOnly('<?php ' . implode('', array_slice(
+        $replicaLines,
+        $replicaRef->getStartLine() - 1,
+        $replicaRef->getEndLine() - $replicaRef->getStartLine() + 1
+    )));
+
+    // Slice sanity: the reflection-driven slice must actually contain the
+    // closure, or every replica-side pin below would scan the wrong bytes.
+    $check('BYTE-SYNC PIN: replica slice contains the closure signature',
+        strpos($replicaSource, 'function (string $storedMessage): ?string') !== false);
+
+    // Missing-entity diagnosis: fail with ONE clear label if Post.php moved
+    // or was renamed, instead of eight misleading "pipeline changed?" failures.
+    $entityPath   = __DIR__ . '/../src/addons/Cav7/SteamChecker/XF/Entity/Post.php';
+    $entityExists = is_file($entityPath);
+    $check('BYTE-SYNC PIN: entity file Post.php exists at pinned path'
+        . ' (entity file missing — moved/renamed? update the path here)',
+        $entityExists);
+    $entitySource = $entityExists
+        ? $codeOnly((string) file_get_contents($entityPath))
+        : '';
+
+    // Anti-vacuity: a deleted pin entry must fail here, not pass silently.
+    $check('BYTE-SYNC PIN: pin list contains all 8 pinned expressions',
+        count($pins) === 8);
+
+    foreach ($pins as $pinName => $pinExpression) {
+        // Anti-vacuity: an emptied pin body would make both strpos checks
+        // below pass against any haystack (strpos($h, '') === 0).
+        $check('BYTE-SYNC PIN: ' . $pinName . ' pin body is non-trivial',
+            strlen(trim($pinExpression)) >= 10);
+        $check('BYTE-SYNC PIN: ' . $pinName . ' appears verbatim in the $commandPipeline'
+            . ' replica (replica changed? re-sync this pin list)',
+            strpos($replicaSource, $pinExpression) !== false);
+        $check('BYTE-SYNC PIN: ' . $pinName . ' appears verbatim in Post.php'
+            . ' (entity pipeline changed? re-sync the BYTE-SYNC PIN replica, then this pin list)',
+            strpos($entitySource, $pinExpression) !== false);
+    }
 
     $fixture = '[QUOTE="VAC Bot, post: 123, member: 99"]' . "\n"
         . $apiError . "\n"
