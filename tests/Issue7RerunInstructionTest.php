@@ -330,6 +330,23 @@ preg_match('/!vac\s+(\S+)/i', $plain, $m)
 PIN,
     ];
 
+    // Entity-only pin (issue #25), deliberately SINGLE-SIDED: the
+    // degenerate-invocation detection (trailing-token rule) consumes the
+    // same normalized $plain the final match does, but it produces a REPLY
+    // DECISION, not a captured token — the $commandPipeline replica models
+    // token extraction only, and no fixture in this suite routes through
+    // the detection. Its behavior is pinned end-to-end (through the real
+    // Post.php) in Issue25DegenerateInvocationTest; here only the expression
+    // bytes in Post.php are pinned, so the detection cannot drift silently.
+    // A negative replica assertion below keeps the single-sidedness honest:
+    // if the detection is ever added to the replica, that check fails and
+    // this pin must be promoted to the two-sided list.
+    $entityOnlyPins = [
+        'degenerate-invocation detection expression (#25)' => <<<'PIN'
+preg_match('/(?:^|\s)!vac\s*$/i', $plain)
+PIN,
+    ];
+
     // Source bytes with comments removed (code + whitespace only).
     $codeOnly = function (string $phpSource): string {
         $code = '';
@@ -371,8 +388,8 @@ PIN,
         : '';
 
     // Anti-vacuity: a deleted pin entry must fail here, not pass silently.
-    $check('BYTE-SYNC PIN: pin list contains all 8 pinned expressions',
-        count($pins) === 8);
+    $check('BYTE-SYNC PIN: pin lists contain all 9 pinned expressions (8 two-sided + 1 entity-only)',
+        count($pins) === 8 && count($entityOnlyPins) === 1);
 
     foreach ($pins as $pinName => $pinExpression) {
         // Anti-vacuity: an emptied pin body would make both strpos checks
@@ -385,6 +402,21 @@ PIN,
         $check('BYTE-SYNC PIN: ' . $pinName . ' appears verbatim in Post.php'
             . ' (entity pipeline changed? re-sync the BYTE-SYNC PIN replica, then this pin list)',
             strpos($entitySource, $pinExpression) !== false);
+    }
+
+    foreach ($entityOnlyPins as $pinName => $pinExpression) {
+        // Same anti-vacuity guard as the two-sided pins.
+        $check('BYTE-SYNC PIN: ' . $pinName . ' pin body is non-trivial',
+            strlen(trim($pinExpression)) >= 10);
+        $check('BYTE-SYNC PIN: ' . $pinName . ' appears verbatim in Post.php'
+            . ' (detection changed? re-sync Issue25DegenerateInvocationTest, then this pin)',
+            strpos($entitySource, $pinExpression) !== false);
+        // Single-sidedness guard: the replica deliberately excludes the
+        // detection (see the pin's comment). If it ever appears there,
+        // promote this entry to the two-sided $pins list instead.
+        $check('BYTE-SYNC PIN: ' . $pinName . ' is absent from the $commandPipeline'
+            . ' replica (deliberately single-sided — promote to two-sided if added)',
+            strpos($replicaSource, $pinExpression) === false);
     }
 
     $fixture = '[QUOTE="VAC Bot, post: 123, member: 99"]' . "\n"

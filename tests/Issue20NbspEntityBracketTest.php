@@ -33,7 +33,9 @@
 
 // ---------------------------------------------------------------------------
 // Spy SteamChecker — stands in for the real class so "a check fired" is
-// observable. Post.php constructs it and calls run() / runManual().
+// observable. Post.php constructs it and calls run() / runManual() /
+// replyDegenerateInvocation() (the #25 usage-reply path; its message bytes
+// are characterized in Issue25DegenerateInvocationTest).
 // ---------------------------------------------------------------------------
 
 namespace Cav7\SteamChecker {
@@ -45,6 +47,8 @@ namespace Cav7\SteamChecker {
         public static $runCalls = 0;
         /** @var string[] */
         public static $runManualCalls = [];
+        /** @var int */
+        public static $degenerateReplies = 0;
 
         public function __construct($thread)
         {
@@ -61,11 +65,17 @@ namespace Cav7\SteamChecker {
             self::$runManualCalls[] = $rawSteamId;
         }
 
+        public function replyDegenerateInvocation(): void
+        {
+            self::$degenerateReplies++;
+        }
+
         public static function reset(): void
         {
             self::$constructed = [];
             self::$runCalls = 0;
             self::$runManualCalls = [];
+            self::$degenerateReplies = 0;
         }
     }
 }
@@ -295,22 +305,24 @@ namespace {
     $check('regression literal brackets: logs stay clean', $logsClean());
 
     // -----------------------------------------------------------------------
-    // Degenerate-argument characterization: an argument made ONLY of entity
-    // brackets/NBSP dissolves to whitespace under the post-decode
-    // neutralization, so the command goes unmatched — NO check fires, NO
-    // reply is sent, and nothing is logged. Deliberate, characterized
-    // contract: consistent with literal '!vac <>' (known-silent since #17).
-    // A follow-up issue tracks possibly replying with the re-run
-    // instruction instead.
+    // Degenerate-invocation contract (flipped by #25): an argument made ONLY
+    // of entity brackets/NBSP dissolves to whitespace under the post-decode
+    // neutralization, so the primary match fails — and the normalized post
+    // ends with a standalone !vac, so the trailing-token rule fires: NO
+    // check runs, but the usage reply (lead-in + re-run instruction) IS
+    // posted. The same family as literal '!vac <>' (silent #17–#24; replied
+    // since #25). Reply bytes are characterized in
+    // Issue25DegenerateInvocationTest.
     // -----------------------------------------------------------------------
     foreach (['!vac &lt;&gt;', '!vac &nbsp;'] as $degenerate) {
         $resetOptions();
         $post = $makePost(['message' => $degenerate]);
         $invoke($post);
-        $check('degenerate "' . $degenerate . '": no check fires and no reply is sent',
+        $check('degenerate "' . $degenerate . '": no check fires, exactly one usage reply (#25)',
             $manuals() === []
-            && \Cav7\SteamChecker\SteamChecker::$constructed === []);
-        $check('degenerate "' . $degenerate . '": logs stay clean (silent contract)',
+            && \Cav7\SteamChecker\SteamChecker::$degenerateReplies === 1
+            && count(\Cav7\SteamChecker\SteamChecker::$constructed) === 1);
+        $check('degenerate "' . $degenerate . '": logs stay clean',
             $logsClean());
     }
 

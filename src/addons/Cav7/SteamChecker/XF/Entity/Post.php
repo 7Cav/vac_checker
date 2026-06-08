@@ -88,7 +88,9 @@ class Post extends XFCP_Post
         // open with a logged error: each falls back to its input, so the
         // command is preserved. The final !vac match instead fails noisy: a
         // PCRE failure there is logged and treated as "no command" (command
-        // dropped, loudly). The only non-PCRE transforms in the pipeline — the
+        // dropped, loudly). The degenerate-invocation detection (#25, below
+        // the match) follows the same fail-noisy convention — logged,
+        // treated as no-trigger. The only non-PCRE transforms in the pipeline — the
         // entity decode and the str_replace neutralization below
         // — cannot fail, so every step now either cannot fail or fails loudly
         // (issue #17 removed the strip_tags() call that could silently drop a
@@ -166,13 +168,16 @@ class Post extends XFCP_Post
         // exactly once. Plain str_replace — no PCRE, so no new fail-open
         // surface. Residuals: (a) an argument made ONLY of brackets and/or
         // neutralized separators ('!vac &lt;&gt;', '!vac &nbsp;') dissolves
-        // to whitespace, so the command goes unmatched silently — the same
-        // known-silent contract literal '!vac <>' has had since #17 (tracked
-        // in #25); (b) semicolon-less '&nbsp' (no ';') does not decode under
+        // to whitespace, so the primary match fails — a degenerate
+        // invocation. Silent from #17 through #24; since #25 the
+        // trailing-token rule below answers it with the usage reply;
+        // (b) semicolon-less '&nbsp' (no ';') does not decode under
         // ENT_HTML5 and stays glued to '!vac' as literal text — browsers do
         // render the legacy no-semicolon form as a space, but handling it
         // would need an unrelated pre-decode special case; excluded by
-        // maintainer decision (issue #23, known residual).
+        // maintainer decision (issue #23, known residual). The glued token
+        // also keeps the #25 trailing-token rule from firing: the post ends
+        // with '!vac&nbsp…', not a standalone '!vac', so it stays silent.
         $plain = str_replace(
             [
                 '<', '>', "\u{00A0}",
@@ -209,6 +214,42 @@ class Post extends XFCP_Post
         }
 
         if (!$vacMatched) {
+            // Trailing-token rule (issue #25): a degenerate invocation — the
+            // normalized post ends with a standalone !vac token (preceded by
+            // start-of-string or whitespace) followed only by whitespace —
+            // gets the two-line usage reply instead of silence. Runs strictly
+            // as a fallback after a GENUINE primary no-match (0): on a
+            // primary-match PCRE failure (false, already logged above) the
+            // parse state is unknown — the post may contain a real command
+            // the matcher could not see, and a "no Steam ID found" reply
+            // would mislabel it — so the fallback is skipped. Conversational
+            // trailing mentions ("just use !vac") deliberately trigger;
+            // punctuation-glued ones ("use !vac.") do not, because the token
+            // is not standalone. No rate limiting by design (stateless, like
+            // the invalid-ID failure path). Fifth PCRE step in the pipeline,
+            // same fail-loud convention as the final match: on PCRE failure,
+            // log the error and treat as no-trigger.
+            if ($vacMatchResult === 0) {
+                $degenerateResult = preg_match('/(?:^|\s)!vac\s*$/i', $plain);
+                if ($degenerateResult === false) {
+                    \XF::logError('[Cav7/SteamChecker] degenerate !vac detection failed (PCRE: '
+                        . preg_last_error_msg() . ') for post_id=' . $this->post_id
+                        . '; treating as no trigger.');
+                } elseif ($degenerateResult === 1) {
+                    if (\XF::options()->steamCheckerDebugLog) {
+                        \XF::logError('[VAC-DEBUG] degenerate !vac invocation (trailing-token rule)'
+                            . ' by user_id=' . $this->user_id
+                            . ' in thread_id=' . $thread->thread_id
+                            . ' post_id=' . $this->post_id);
+                    }
+                    try {
+                        $checker = new \Cav7\SteamChecker\SteamChecker($thread);
+                        $checker->replyDegenerateInvocation();
+                    } catch (\Throwable $e) {
+                        \XF::logException($e, false, '[Cav7/SteamChecker] degenerate !vac reply error: ');
+                    }
+                }
+            }
             return;
         }
 
