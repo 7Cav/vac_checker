@@ -241,9 +241,11 @@ namespace {
     // AC3: neutralization must never DELETE the command or its surrounding
     // text the way strip_tags did — text formerly inside a closed '<…>' span
     // no longer disappears, and a command inside such a span now fires.
-    // (Residual, post-#20/#21: an ARGUMENT made only of brackets/NBSP can
-    // still dissolve to whitespace and go unmatched — carved out in Post.php
-    // and characterized in Issue20NbspEntityBracketTest.)
+    // (Residual, post-#20/#21/#23: an ARGUMENT made only of brackets or
+    // neutralized separators can still dissolve to whitespace and go
+    // unmatched — carved out in Post.php, characterized in
+    // Issue20NbspEntityBracketTest / Issue23InvisibleSeparatorTest, and
+    // tracked in #25.)
     // -----------------------------------------------------------------------
     $resetOptions();
     $post = $makePost(['message' => '<!vac ' . $realId . '>']);

@@ -156,9 +156,11 @@ class Post extends XFCP_Post
         // raw code points pasted from rendered HTML — become plain spaces
         // the ASCII-only \s in the final match can see (issues #20, #23).
         // Do NOT swap this for /u on the final match: under PCRE, Unicode \s
-        // matches Zs but not Cf, so U+200B/U+200C/U+200D/U+2060/U+FEFF would
-        // still slip through, and it would add a PCRE failure mode to a step
-        // that currently cannot fail. Safe order: a single-pass
+        // covers the family's Zs spaces but not its five Cf format
+        // characters — U+200B/U+200C/U+200D/U+2060/U+FEFF would still slip
+        // through — and it would move separator handling from this
+        // infallible str_replace into PCRE, adding a new failure mode to the
+        // match. Safe order: a single-pass
         // html_entity_decode never decodes recursively — '&amp;lt;' yields
         // the literal text '&lt;', not a bracket — and this pipeline decodes
         // exactly once. Plain str_replace — no PCRE, so no new fail-open

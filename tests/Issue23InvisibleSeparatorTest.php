@@ -5,7 +5,8 @@
  * drop !vac commands.
  *
  * The final match's `\s` is ASCII-only (no /u), and #20 neutralized exactly
- * one non-ASCII code point (U+00A0). Every other invisible separator —
+ * one non-ASCII code point (U+00A0). Every other separator in the known
+ * invisible-rendering family (#23's scoped list) —
  * the U+2000–U+200D quad/space block (incl. ZWSP/ZWNJ/ZWJ), U+202F NARROW
  * NO-BREAK SPACE, U+205F MEDIUM MATHEMATICAL SPACE, U+2060 WORD JOINER,
  * U+3000 IDEOGRAPHIC SPACE, U+FEFF ZWNBSP/BOM — glued `!vac` and its
@@ -14,8 +15,9 @@
  * Fix: extend the post-decode str_replace neutralization with the family
  * above. Plain str_replace — no PCRE, preserving the "every step either
  * cannot fail or fails loudly" property. /u on the final match is NOT a
- * substitute: Unicode \s matches Zs but not Cf, so U+200B/U+200C/U+200D/
- * U+2060/U+FEFF would still slip through, and it adds a PCRE failure mode.
+ * substitute: Unicode \s covers the family's Zs spaces but not its five Cf
+ * format characters (U+200B/U+200C/U+200D/U+2060/U+FEFF), and it adds a
+ * PCRE failure mode.
  *
  * Entity forms (&thinsp;, &numsp;, &emsp;, &MediumSpace;, &NoBreak;,
  * &ZeroWidthSpace;) are covered for free because the neutralization runs
@@ -299,6 +301,23 @@ namespace {
         $check("degenerate $label: logs stay clean (silent contract)",
             $logsClean());
     }
+
+    // -----------------------------------------------------------------------
+    // Known-residual characterization: semicolon-less '&nbsp' (no ';') does
+    // NOT decode under ENT_HTML5, stays glued to '!vac' as literal text, and
+    // the command goes unmatched silently. Excluded by maintainer decision
+    // (issue #23 out-of-scope; documented as residual (b) in Post.php) —
+    // pinned here so the documented residual stays honest against future
+    // entity-decode changes.
+    // -----------------------------------------------------------------------
+    $resetOptions();
+    $post = $makePost(['message' => '!vac&nbsp' . $realId]);
+    $invoke($post);
+    $check('known residual "!vac&nbsp<id>" (no semicolon): stays glued, no check fires',
+        $manuals() === []
+        && \Cav7\SteamChecker\SteamChecker::$constructed === []);
+    $check('known residual "!vac&nbsp<id>": logs stay clean (silent contract)',
+        $logsClean());
 
     // -----------------------------------------------------------------------
     // Invisible-char-inside-token characterization: a family code point in
