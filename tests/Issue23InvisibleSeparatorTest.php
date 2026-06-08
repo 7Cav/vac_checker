@@ -24,6 +24,14 @@
  * AFTER the single entity decode — pinned here so a pipeline reorder that
  * breaks the free coverage fails this test.
  *
+ * Issue #31 (ADR-0001) later closed the family by category: the needle list
+ * is now every Zs/Zl/Zp/Cf code point at Unicode 16.0 minus U+0020 (188
+ * entries, generated once and pasted) plus the #17 brackets. The
+ * family-closure section below samples the post-#23 members — incl. bidi
+ * embedding controls and an astral tag character — in both shapes
+ * (glued-with-id, trailing-no-id) and flips the former #31 known-residual
+ * pins to loud.
+ *
  * Self-contained: predefines a stub XFCP_Post proxy base class and a spy
  * \Cav7\SteamChecker\SteamChecker (the real SteamChecker.php is never loaded)
  * before requiring the real Post.php, then drives the protected _postSave()
@@ -203,7 +211,9 @@ namespace {
 
     // The invisible-separator family pinned by issue #23 (exact code-point
     // list from the agent brief): U+2000–U+200D, U+202F, U+205F, U+2060,
-    // U+3000, U+FEFF.
+    // U+3000, U+FEFF. This is the historical #23 discovery subset; the
+    // post-#23 members of the full ADR-0001 family are sampled in the
+    // family-closure section below (#31).
     $invisibles = [
         0x2000 => 'EN QUAD',
         0x2001 => 'EM QUAD',
@@ -298,7 +308,9 @@ namespace {
     // naive bare-"!vac" detection only when it GLUES to a following
     // argument (see the AC1 cases and the residual below); in-family
     // separator-only arguments are exactly what the trailing-token rule
-    // answers (out-of-family ones stay silent, see #31). Reply bytes are
+    // answers (since #31 "in-family" is the whole Zs/Zl/Zp/Cf set —
+    // out-of-scope render-blank look-alikes stay silent, see ADR-0001 and
+    // .out-of-scope/render-blank-characters.md). Reply bytes are
     // characterized in Issue25DegenerateInvocationTest.
     // -----------------------------------------------------------------------
     $separatorOnly = [
@@ -356,28 +368,54 @@ namespace {
         $logsClean());
 
     // -----------------------------------------------------------------------
-    // Known-residual characterization (#31): NON-neutralized invisibles —
-    // U+2028 LINE SEPARATOR / U+2029 PARAGRAPH SEPARATOR, which render as
-    // line breaks — are outside the #23 family by maintainer decision
-    // (Post.php residual (c)). Trailing one onto '!vac' (no id) misses BOTH
-    // detections: the invisible glues to '!vac' as one token, so the primary
-    // match's ASCII \s never separates them (primary fails), and the post
-    // then ends with that glued token rather than a standalone '!vac', so
-    // the #25 trailing-token rule skips it too. Fully silent. Pinned so the
-    // documented residual stays honest; extending the family is issue #31.
+    // Family closure (issue #31, ADR-0001): the needle list is no longer the
+    // #23 discovery set but the full separator/format-control family — every
+    // Zs/Zl/Zp/Cf code point at Unicode 16.0 minus U+0020. Sampled members
+    // beyond the #23 list — soft hyphen, Ogham space mark, Mongolian vowel
+    // separator, LRM/RLM, line/paragraph separators, two bidi embedding
+    // controls, and an astral tag character (pins that multibyte AND astral
+    // needles actually work in the byte-oriented str_replace) — must behave
+    // exactly like the #23 members. Two shapes each:
+    //   glued-with-id  "!vac<C><id>" -> C separates; the check fires on the id
+    //   trailing-no-id "!vac<C>"     -> degenerate invocation -> usage reply
+    //                                   via the #25 trailing-token rule
+    // The trailing U+2028/U+2029 cases FLIP the former #31 known-residual
+    // pins (fully-silent characterization) to loud — scenarios retained,
+    // expectations inverted, per the #31 brief.
     // -----------------------------------------------------------------------
-    foreach ([0x2028 => 'LINE SEPARATOR', 0x2029 => 'PARAGRAPH SEPARATOR'] as $cp => $name) {
+    $familyClosure = [
+        0x00AD  => 'SOFT HYPHEN',
+        0x1680  => 'OGHAM SPACE MARK',
+        0x180E  => 'MONGOLIAN VOWEL SEPARATOR',
+        0x200E  => 'LEFT-TO-RIGHT MARK',
+        0x200F  => 'RIGHT-TO-LEFT MARK',
+        0x2028  => 'LINE SEPARATOR',
+        0x2029  => 'PARAGRAPH SEPARATOR',
+        0x202A  => 'LEFT-TO-RIGHT EMBEDDING',
+        0x202E  => 'RIGHT-TO-LEFT OVERRIDE',
+        0xE0041 => 'TAG LATIN CAPITAL LETTER A',
+    ];
+    foreach ($familyClosure as $cp => $name) {
         $label = sprintf('U+%04X %s', $cp, $name);
+
+        // Shape 1: glued-with-id — the member acts as a separator.
+        $resetOptions();
+        $post = $makePost(['message' => '!vac' . mb_chr($cp, 'UTF-8') . $realId]);
+        $invoke($post);
+        $check("family closure $label glued-with-id: exactly one check fires with the bare id (#31)",
+            $manuals() === [$realId]);
+        $check("family closure $label glued-with-id: logs stay clean", $logsClean());
+
+        // Shape 2: trailing-no-id — the member dissolves, the post ends with
+        // a standalone !vac, the #25 trailing-token rule answers.
         $resetOptions();
         $post = $makePost(['message' => '!vac' . mb_chr($cp, 'UTF-8')]);
         $invoke($post);
-        $check("known residual \"!vac<$label>\" (trailing, no id): fully silent"
-            . ' (no manual, no degenerate reply, no construction) — #31',
+        $check("family closure $label trailing-no-id: no check, exactly one usage reply (#31)",
             $manuals() === []
-            && \Cav7\SteamChecker\SteamChecker::$degenerateReplies === 0
-            && \Cav7\SteamChecker\SteamChecker::$constructed === []);
-        $check("known residual \"!vac<$label>\": logs stay clean (silent contract)",
-            $logsClean());
+            && \Cav7\SteamChecker\SteamChecker::$degenerateReplies === 1
+            && count(\Cav7\SteamChecker\SteamChecker::$constructed) === 1);
+        $check("family closure $label trailing-no-id: logs stay clean", $logsClean());
     }
 
     // -----------------------------------------------------------------------

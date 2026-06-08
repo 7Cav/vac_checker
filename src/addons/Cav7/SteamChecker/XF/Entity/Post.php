@@ -139,12 +139,18 @@ class Post extends XFCP_Post
                 . '; using message as-is.');
             $bbStripped = $plain; // fail open per documented contract
         }
-        // Decode entities, then neutralize '<', '>', U+00A0 NO-BREAK SPACE,
-        // and the invisible-separator family — U+2000–U+200D (the quad/space
-        // block, incl. ZWSP/ZWNJ/ZWJ), U+202F NARROW NO-BREAK SPACE, U+205F
-        // MEDIUM MATHEMATICAL SPACE, U+2060 WORD JOINER, U+3000 IDEOGRAPHIC
-        // SPACE, U+FEFF ZWNBSP/BOM — by replacing each with a single space
-        // (issues #17, #20, #21, #23). XF messages are BBCode, not HTML, so
+        // Decode entities, then neutralize '<', '>' (issue #17) and the
+        // separator/format-control family — every code point with Unicode
+        // general category Zs, Zl, Zp, or Cf, minus U+0020: 188 code points
+        // pinned at Unicode 16.0, generated once with the ADR-0001 script
+        // and pasted below as literal needles — by replacing each with a
+        // single space (issues #17, #20, #21, #23, #31; ADR-0001 closed the
+        // family by category after three rounds of discovery-driven lists).
+        // No runtime derivation: the CI image has no intl extension, and
+        // this step's contract is that it cannot fail — a Unicode bump means
+        // rerunning the generator and re-syncing the three BYTE-SYNC places
+        // (this needle list, the test replica, the mechanized pin nowdoc).
+        // XF messages are BBCode, not HTML, so
         // there are no real tags to strip here; under the old strip_tags()
         // call, any '<' followed by a non-whitespace character opened a
         // pseudo-tag deleted through the next '>', or to end-of-string when
@@ -158,9 +164,10 @@ class Post extends XFCP_Post
         // raw code points pasted from rendered HTML — become plain spaces
         // the ASCII-only \s in the final match can see (issues #20, #23).
         // Do NOT swap this for /u on the final match: under PCRE, Unicode \s
-        // covers the family's Zs spaces but not its five Cf format
-        // characters — U+200B/U+200C/U+200D/U+2060/U+FEFF would still slip
-        // through — and it would move separator handling from this
+        // covers the family's Zs spaces but none of its Cf format
+        // characters — ZWSP/ZWNJ/ZWJ, LRM/RLM, the bidi embedding controls,
+        // the astral tag block, … would still slip through — and it would
+        // move separator handling from this
         // infallible str_replace into PCRE, adding a new failure mode to the
         // match. Safe order: a single-pass
         // html_entity_decode never decodes recursively — '&amp;lt;' yields
@@ -180,17 +187,53 @@ class Post extends XFCP_Post
         // maintainer decision (issue #23, known residual). The glued token
         // also keeps the #25 trailing-token rule from firing: the post ends
         // with '!vac&nbsp…', not a standalone '!vac', so it stays silent.
-        // (c) non-neutralized invisibles (e.g. U+2028/U+2029
-        // LINE/PARAGRAPH SEPARATOR, which render as line breaks) glue to
-        // !vac, so both the primary match and the trailing-token rule miss
-        // them — fully silent; family extension tracked in #31.
+        // The former residual (c) — invisibles outside the discovery-driven
+        // list (U+2028/U+2029 et al.) — was closed by #31's family closure.
+        // Characters that merely RENDER blank but sit outside Zs/Zl/Zp/Cf
+        // (Hangul fillers, braille blank, variation selectors) are out of
+        // scope by the ADR-0001 boundary; see
+        // .out-of-scope/render-blank-characters.md.
         $plain = str_replace(
             [
-                '<', '>', "\u{00A0}",
-                "\u{2000}", "\u{2001}", "\u{2002}", "\u{2003}", "\u{2004}",
-                "\u{2005}", "\u{2006}", "\u{2007}", "\u{2008}", "\u{2009}",
-                "\u{200A}", "\u{200B}", "\u{200C}", "\u{200D}",
-                "\u{202F}", "\u{205F}", "\u{2060}", "\u{3000}", "\u{FEFF}",
+                '<', '>',
+                "\u{00A0}", "\u{00AD}", "\u{0600}", "\u{0601}", "\u{0602}",
+                "\u{0603}", "\u{0604}", "\u{0605}", "\u{061C}", "\u{06DD}",
+                "\u{070F}", "\u{0890}", "\u{0891}", "\u{08E2}", "\u{1680}",
+                "\u{180E}", "\u{2000}", "\u{2001}", "\u{2002}", "\u{2003}",
+                "\u{2004}", "\u{2005}", "\u{2006}", "\u{2007}", "\u{2008}",
+                "\u{2009}", "\u{200A}", "\u{200B}", "\u{200C}", "\u{200D}",
+                "\u{200E}", "\u{200F}", "\u{2028}", "\u{2029}", "\u{202A}",
+                "\u{202B}", "\u{202C}", "\u{202D}", "\u{202E}", "\u{202F}",
+                "\u{205F}", "\u{2060}", "\u{2061}", "\u{2062}", "\u{2063}",
+                "\u{2064}", "\u{2066}", "\u{2067}", "\u{2068}", "\u{2069}",
+                "\u{206A}", "\u{206B}", "\u{206C}", "\u{206D}", "\u{206E}",
+                "\u{206F}", "\u{3000}", "\u{FEFF}", "\u{FFF9}", "\u{FFFA}",
+                "\u{FFFB}", "\u{110BD}", "\u{110CD}", "\u{13430}", "\u{13431}",
+                "\u{13432}", "\u{13433}", "\u{13434}", "\u{13435}", "\u{13436}",
+                "\u{13437}", "\u{13438}", "\u{13439}", "\u{1343A}", "\u{1343B}",
+                "\u{1343C}", "\u{1343D}", "\u{1343E}", "\u{1343F}", "\u{1BCA0}",
+                "\u{1BCA1}", "\u{1BCA2}", "\u{1BCA3}", "\u{1D173}", "\u{1D174}",
+                "\u{1D175}", "\u{1D176}", "\u{1D177}", "\u{1D178}", "\u{1D179}",
+                "\u{1D17A}", "\u{E0001}", "\u{E0020}", "\u{E0021}", "\u{E0022}",
+                "\u{E0023}", "\u{E0024}", "\u{E0025}", "\u{E0026}", "\u{E0027}",
+                "\u{E0028}", "\u{E0029}", "\u{E002A}", "\u{E002B}", "\u{E002C}",
+                "\u{E002D}", "\u{E002E}", "\u{E002F}", "\u{E0030}", "\u{E0031}",
+                "\u{E0032}", "\u{E0033}", "\u{E0034}", "\u{E0035}", "\u{E0036}",
+                "\u{E0037}", "\u{E0038}", "\u{E0039}", "\u{E003A}", "\u{E003B}",
+                "\u{E003C}", "\u{E003D}", "\u{E003E}", "\u{E003F}", "\u{E0040}",
+                "\u{E0041}", "\u{E0042}", "\u{E0043}", "\u{E0044}", "\u{E0045}",
+                "\u{E0046}", "\u{E0047}", "\u{E0048}", "\u{E0049}", "\u{E004A}",
+                "\u{E004B}", "\u{E004C}", "\u{E004D}", "\u{E004E}", "\u{E004F}",
+                "\u{E0050}", "\u{E0051}", "\u{E0052}", "\u{E0053}", "\u{E0054}",
+                "\u{E0055}", "\u{E0056}", "\u{E0057}", "\u{E0058}", "\u{E0059}",
+                "\u{E005A}", "\u{E005B}", "\u{E005C}", "\u{E005D}", "\u{E005E}",
+                "\u{E005F}", "\u{E0060}", "\u{E0061}", "\u{E0062}", "\u{E0063}",
+                "\u{E0064}", "\u{E0065}", "\u{E0066}", "\u{E0067}", "\u{E0068}",
+                "\u{E0069}", "\u{E006A}", "\u{E006B}", "\u{E006C}", "\u{E006D}",
+                "\u{E006E}", "\u{E006F}", "\u{E0070}", "\u{E0071}", "\u{E0072}",
+                "\u{E0073}", "\u{E0074}", "\u{E0075}", "\u{E0076}", "\u{E0077}",
+                "\u{E0078}", "\u{E0079}", "\u{E007A}", "\u{E007B}", "\u{E007C}",
+                "\u{E007D}", "\u{E007E}", "\u{E007F}",
             ],
             ' ',
             html_entity_decode($bbStripped, ENT_QUOTES | ENT_HTML5, 'UTF-8')

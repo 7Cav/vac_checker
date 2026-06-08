@@ -263,6 +263,13 @@ namespace {
         'literal "!vac <>"'             => '!vac <>',
         'entity brackets "!vac &lt;&gt;"' => '!vac &lt;&gt;',
         'entity NBSP "!vac &nbsp;"'     => '!vac &nbsp;',
+        // #31 family closure: a trailing in-family separator (U+2028 LINE
+        // SEPARATOR — renders as a line break, so the post LOOKS like a bare
+        // "!vac") dissolves under the ADR-0001 needle list and gets the same
+        // byte-exact usage reply instead of the pre-#31 silence. End-to-end
+        // (real reply path) counterpart of the flipped pins in the issue-23
+        // suite.
+        'trailing U+2028 "!vac<LS>" (#31)' => "!vac\u{2028}",
     ];
     foreach ($degenerateForms as $label => $message) {
         $resetState();
