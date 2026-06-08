@@ -14,9 +14,18 @@ _Avoid_: help text, usage message
 
 **Normalized post**:
 A reply's message after the full `!vac` parse pipeline has run: quotes
-stripped, URLs unwrapped, BBCode stripped, entities decoded once, invisible
-separators and angle brackets neutralized to spaces.
+stripped, URLs unwrapped, BBCode stripped, entities decoded once, the
+separator/format-control family and angle brackets neutralized to spaces.
 _Avoid_: plain text, stripped message
+
+**Separator/format-control family**:
+The closed set of code points neutralized to spaces during normalization:
+every code point with Unicode general category Zs, Zl, Zp, or Cf, minus
+U+0020 — generated once at Unicode 16.0 (188 code points) and pasted as
+literal needles (ADR-0001). Defined by category, not by discovery.
+_Avoid_: invisible separators (the historical discovery-driven subset),
+invisible characters (broader — includes out-of-scope render-blank
+look-alikes, see `.out-of-scope/render-blank-characters.md`)
 
 **Degenerate invocation**:
 A `!vac` attempt with no usable argument: the normalized post ends with a
