@@ -17,7 +17,9 @@
  * cannot fail or fails loudly" property. /u on the final match is NOT a
  * substitute: Unicode \s covers the family's Zs spaces but not its five Cf
  * format characters (U+200B/U+200C/U+200D/U+2060/U+FEFF), and it adds a
- * PCRE failure mode.
+ * PCRE failure mode. (This Zs-vs-Cf framing is scoped to #23's subset; see
+ * #31 / ADR-0001 for the full Zs/Zl/Zp/Cf picture, incl. the PCRE2 U+180E
+ * quirk where Unicode \s does cover one Cf member.)
  *
  * Entity forms (&thinsp;, &numsp;, &emsp;, &MediumSpace;, &NoBreak;,
  * &ZeroWidthSpace;) are covered for free because the neutralization runs
@@ -518,6 +520,35 @@ namespace {
             $check("interior $label $shape trailing: logs stay clean", $logsClean());
         }
     }
+
+    // -----------------------------------------------------------------------
+    // Stacked-interior closure (issue #31, sentinel+heal): MULTIPLE family
+    // chars in one interior gap, and a char in EVERY gap, must still heal.
+    // This pins the heal's '\x00*' (zero-or-MORE) quantifier semantics: two
+    // sentinels in a single gap ('!v<C1><C2>ac' -> '!v<NUL><NUL>ac') only heal
+    // if the run is matched greedily as a group, not a single optional NUL;
+    // a char in every gap ('!<C>v<C>a<C>c') exercises all three '\x00*' runs at
+    // once. Were the quantifier '\x00' (exactly one) instead of '\x00*', the
+    // two-in-one-gap case would NOT heal and would go silent — so this case
+    // would FAIL, which is the point of pinning it.
+    $C1 = mb_chr(0x00AD, 'UTF-8'); // SOFT HYPHEN
+    $C2 = mb_chr(0x200B, 'UTF-8'); // ZERO WIDTH SPACE
+
+    // Two family chars in ONE interior gap, glued-with-id: heals on the id.
+    $resetOptions();
+    $post = $makePost(['message' => '!v' . $C1 . $C2 . 'ac ' . $realId]);
+    $invoke($post);
+    $check('stacked interior "!v<U+00AD><U+200B>ac <id>": two sentinels in one gap heal, fires on the bare id (#31)',
+        $manuals() === [$realId]);
+    $check('stacked interior two-in-one-gap: logs stay clean', $logsClean());
+
+    // A family char in EVERY interior gap, glued-with-id: heals on the id.
+    $resetOptions();
+    $post = $makePost(['message' => '!' . $C1 . 'v' . $C1 . 'a' . $C1 . 'c ' . $realId]);
+    $invoke($post);
+    $check('stacked interior "!<C>v<C>a<C>c <id>": a char in every gap heals, fires on the bare id (#31)',
+        $manuals() === [$realId]);
+    $check('stacked interior char-in-every-gap: logs stay clean', $logsClean());
 
     // -----------------------------------------------------------------------
     // False-positive guards (issue #31): the heal repairs ONLY family

@@ -140,14 +140,15 @@ class Post extends XFCP_Post
             $bbStripped = $plain; // fail open per documented contract
         }
         // Decode entities, then neutralize the separator/format-control
-        // family and '<', '>' (issue #17). The family is every code point
-        // with Unicode general category Zs, Zl, Zp, or Cf, minus U+0020: 188
-        // code points pinned at Unicode 16.0, generated once with the ADR-0001
-        // script and pasted below as literal needles (issues #17, #20, #21,
-        // #23, #31; ADR-0001 closed the family by category after three rounds
-        // of discovery-driven lists). No runtime derivation: the CI image has
-        // no intl extension, and family identification's contract is that it
-        // cannot fail — a Unicode bump means rerunning the generator and
+        // family and '<', '>' (issue #17, in its own prior step — the brackets
+        // are NOT among the 188 family needles below). The family is every
+        // code point with Unicode general category Zs, Zl, Zp, or Cf, minus
+        // U+0020: 188 code points pinned at Unicode 16.0, generated once with
+        // the ADR-0001 script and pasted below as literal needles (issues #20,
+        // #21, #23, #31; ADR-0001 closed the family by category after three
+        // rounds of discovery-driven lists). No runtime derivation: the CI
+        // image has no intl extension, and family identification's contract is
+        // that it cannot fail — a Unicode bump means rerunning the generator and
         // re-syncing the three BYTE-SYNC places (this needle list, the test
         // replica, the mechanized pin nowdoc).
         //
@@ -286,6 +287,12 @@ class Post extends XFCP_Post
         // and stay silent — no flexible '!\s*v\s*a\s*c' false-fire. Same
         // fail-open-with-logged-error guard as the three strips above: on
         // null, log and fall back to the pre-heal string.
+        // The fail-open (preg_replace -> null) branch is covered by convention,
+        // not by a behavioral fixture: the '\x00*' runs are anchored by the
+        // disjoint literals !/v/a/c, so the pattern cannot catastrophically
+        // backtrack and preg_replace -> null is unreachable at the default
+        // pcre.backtrack_limit. Same documentation-not-fixture treatment as the
+        // Issue25 degenerate-detection branch.
         $healed = preg_replace('/!\x00*v\x00*a\x00*c/i', '!vac', $plain);
         if ($healed === null) {
             \XF::logError('[Cav7/SteamChecker] !vac heal failed (PCRE: '
@@ -296,9 +303,10 @@ class Post extends XFCP_Post
         $plain = $healed;
         // Remaining sentinels were true separators -> become the spaces the
         // ASCII \s in the final match sees. Any pre-existing NUL is harmlessly
-        // mapped to a space here too; only '!vac'-adjacent sentinels were ever
-        // touched by the heal above, so a stray NUL elsewhere cannot forge a
-        // command.
+        // mapped to a space here too. A NUL NOT adjacent to a '!vac' literal
+        // cannot forge a command; a raw NUL adjacent to the literal IS healed
+        // identically to a family sentinel (by design — benign), and XF input
+        // filtering strips raw NULs upstream anyway.
         $plain = str_replace("\x00", ' ', $plain);
 
         // Final match: the fourth PCRE step, carrying the same fail-open

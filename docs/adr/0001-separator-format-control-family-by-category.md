@@ -51,10 +51,11 @@ U+1D173–1D17A, U+E0001, U+E0020–E007F
 run, which is exactly the kind of detail hand-listing gets wrong.)
 
 The list is **generated once and pasted** as literal `"\u{…}"` needles into
-the infallible `str_replace`, alongside the `'<'`/`'>'` entries from #17. No
-runtime derivation: the CI image (`php:8.3-cli`) has no intl extension, and
-deriving at runtime would add a failure mode to a step whose entire value is
-that it cannot fail.
+its own infallible `str_replace` to the NUL sentinel (the "sentinel + heal"
+steps below); `'<'`/`'>'` from #17 are neutralized to a space in a separate
+prior `str_replace`, not mixed into this needle list. No runtime derivation:
+the CI image (`php:8.3-cli`) has no intl extension, and deriving at runtime
+would add a failure mode to a step whose entire value is that it cannot fail.
 
 Generator — rerun to re-derive on a Unicode bump, diff against the pasted
 list, then walk the three-place BYTE-SYNC sync (entity needle list, test
