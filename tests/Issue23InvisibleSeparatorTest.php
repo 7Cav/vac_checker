@@ -368,6 +368,54 @@ namespace {
         $logsClean());
 
     // -----------------------------------------------------------------------
+    // Known-residual characterization: semicolon-less '&shy' (no ';'), the
+    // soft-hyphen sibling of '&nbsp'. Widening the family to U+00AD (#31) made
+    // '&shy;' (WITH ';') decode to the in-family U+00AD and neutralize like
+    // any separator — but the legacy no-semicolon form '&shy' still does NOT
+    // decode under ENT_HTML5: it stays glued to '!vac' as literal text, the
+    // bytes never become the U+00AD code point, so the family str_replace
+    // never sees it. Same residual-(b) MECHANISM as '&nbsp' (entity decoding,
+    // not a raw code point) and the same standing maintainer exclusion (#23).
+    // Behavior is UNCHANGED by #31 — pinned here, mirroring the '&nbsp' pins
+    // above, so the documented residual stays honest.
+    // -----------------------------------------------------------------------
+    $resetOptions();
+    $post = $makePost(['message' => '!vac&shy' . $realId]);
+    $invoke($post);
+    $check('known residual "!vac&shy<id>" (no semicolon): stays glued, no check fires, no usage reply',
+        $manuals() === []
+        && \Cav7\SteamChecker\SteamChecker::$degenerateReplies === 0
+        && \Cav7\SteamChecker\SteamChecker::$constructed === []);
+    $check('known residual "!vac&shy<id>": logs stay clean (silent contract)',
+        $logsClean());
+
+    // Standalone variant: '!vac&shy' alone (no id). The undecoded '&shy'
+    // glues to '!vac' as one token, so the primary match fails AND the post
+    // does not end with a standalone '!vac' — the #25 trailing-token rule
+    // skips it too. Fully silent.
+    $resetOptions();
+    $post = $makePost(['message' => '!vac&shy']);
+    $invoke($post);
+    $check('known residual standalone "!vac&shy" (no id): glued token, fully silent'
+        . ' (no manual, no degenerate reply, no construction)',
+        $manuals() === []
+        && \Cav7\SteamChecker\SteamChecker::$degenerateReplies === 0
+        && \Cav7\SteamChecker\SteamChecker::$constructed === []);
+    $check('known residual standalone "!vac&shy": logs stay clean (silent contract)',
+        $logsClean());
+
+    // Contrast pin: the semicolon-TERMINATED '&shy;' DOES decode to the
+    // in-family U+00AD and is neutralized — '!vac&shy;<id>' fires on the id
+    // exactly like a raw separator. This is what makes '&shy' (no ';') a
+    // residual rather than in-family: only the decoding boundary differs.
+    $resetOptions();
+    $post = $makePost(['message' => '!vac&shy;' . $realId]);
+    $invoke($post);
+    $check('contrast "!vac&shy;<id>" (with semicolon): decodes to U+00AD, fires with the bare id (#31)',
+        $manuals() === [$realId]);
+    $check('contrast "!vac&shy;<id>": logs stay clean', $logsClean());
+
+    // -----------------------------------------------------------------------
     // Family closure (issue #31, ADR-0001): the needle list is no longer the
     // #23 discovery set but the full separator/format-control family — every
     // Zs/Zl/Zp/Cf code point at Unicode 16.0 minus U+0020. Sampled members

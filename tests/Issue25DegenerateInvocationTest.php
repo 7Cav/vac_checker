@@ -254,9 +254,11 @@ namespace {
     $realId = '76561198000000001';
 
     // -----------------------------------------------------------------------
-    // AC1: each degenerate form — bare '!vac', literal '!vac <>', entity
-    // '!vac &lt;&gt;', entity '!vac &nbsp;' — posts exactly the two-line
-    // usage reply (lead-in + re-run instruction) instead of silence.
+    // AC1: each degenerate form in $degenerateForms below posts exactly the
+    // two-line usage reply (lead-in + re-run instruction) instead of silence
+    // — covering bare/bracket/entity arguments that dissolve, a trailing
+    // in-family separator (#31), and a family char INSIDE the literal that
+    // heals back to a standalone !vac (#31 sentinel+heal).
     // -----------------------------------------------------------------------
     $degenerateForms = [
         'bare "!vac"'                   => '!vac',
@@ -270,6 +272,12 @@ namespace {
         // (real reply path) counterpart of the flipped pins in the issue-23
         // suite.
         'trailing U+2028 "!vac<LS>" (#31)' => "!vac\u{2028}",
+        // #31 sentinel+heal: a family char INSIDE the literal ('!v<U+00AD>ac')
+        // formerly split '!vac' into '!v ac' and went fully silent. It now
+        // heals back to a standalone '!vac' and gets the same byte-exact usage
+        // reply through the REAL reply path — the end-to-end counterpart of
+        // the interior pins in the issue-23 suite.
+        'interior U+00AD "!v<SHY>ac" (#31)' => "!v\u{00AD}ac",
     ];
     foreach ($degenerateForms as $label => $message) {
         $resetState();
