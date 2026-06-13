@@ -234,7 +234,7 @@ namespace Issue36Tests {
         'PC enlistment with an unresolvable Steam value still gets the manual-check reply',
         count($checker->posted) === 1
             && strpos($checker->posted[0], 'Manual check required') !== false
-            && strpos($checker->posted[0], 'Raw value: not-a-real-steam-id-just-a-nickname') !== false,
+            && strpos($checker->posted[0], 'Raw value:[/B] not-a-real-steam-id-just-a-nickname') !== false,
         'posted: ' . var_export($checker->posted, true)
     );
 

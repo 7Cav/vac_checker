@@ -180,23 +180,23 @@ namespace Issue6Tests {
     // --- Test 1: builder shows persona name line near SteamID line ----------
     $checker = makeChecker();
     $report = $checker->callBuildBanReportMessage(STEAM_ID, CLEAN_BAN_DATA, 'GamerDude');
-    $lines = explode("\n", $report);
-    // SteamID line is a clickable profile link since issue #5.
-    $steamIdIdx = array_search(
-        'SteamID: [URL="https://steamcommunity.com/profiles/' . STEAM_ID . '"]' . STEAM_ID . '[/URL]',
-        $lines,
-        true
-    );
-    $nameIdx = array_search('Profile Name: [PLAIN]GamerDude[/PLAIN]', $lines, true);
+    // The persona name and the clickable SteamID link (issue #5) now share one
+    // merged profile line.
+    $profileLine = profileNameLine($report);
     check(
-        'builder includes Profile Name line',
-        $nameIdx !== false,
+        'builder includes a profile line',
+        $profileLine !== null,
         "report was:\n$report"
     );
     check(
-        'Profile Name line adjacent to SteamID line',
-        $steamIdIdx !== false && $nameIdx !== false && abs($nameIdx - $steamIdIdx) === 1,
-        "steamIdIdx=" . var_export($steamIdIdx, true) . " nameIdx=" . var_export($nameIdx, true)
+        'profile line carries the persona name and the SteamID link together',
+        $profileLine !== null
+            && strpos($profileLine, '[PLAIN]GamerDude[/PLAIN]') !== false
+            && strpos(
+                $profileLine,
+                '[URL="https://steamcommunity.com/profiles/' . STEAM_ID . '"]' . STEAM_ID . '[/URL]'
+            ) !== false,
+        "profile line: " . var_export($profileLine, true)
     );
 
     // --- Test 2: null persona name renders degraded "(unknown)" line --------
@@ -204,12 +204,12 @@ namespace Issue6Tests {
     $report = $checker->callBuildBanReportMessage(STEAM_ID, CLEAN_BAN_DATA, null);
     check(
         'null persona name renders (unknown)',
-        strpos($report, 'Profile Name: (unknown)') !== false,
+        strpos($report, '[B]Profile:[/B] (unknown)') !== false,
         "report was:\n$report"
     );
     check(
         'null persona name still produces full ban report',
-        strpos($report, 'VAC Bans: 0') !== false && strpos($report, 'No bans found') !== false,
+        strpos($report, '[*][B]VAC bans:[/B] 0') !== false && strpos($report, 'No bans found') !== false,
         "report was:\n$report"
     );
 
@@ -218,7 +218,7 @@ namespace Issue6Tests {
     $report = $checker->callBuildBanReportMessage(STEAM_ID, CLEAN_BAN_DATA, '');
     check(
         'empty-string persona name renders (unknown)',
-        strpos($report, 'Profile Name: (unknown)') !== false,
+        strpos($report, '[B]Profile:[/B] (unknown)') !== false,
         "report was:\n$report"
     );
 
@@ -226,17 +226,17 @@ namespace Issue6Tests {
     $report = $checker->callBuildBanReportMessage(STEAM_ID, CLEAN_BAN_DATA, "  \t ");
     check(
         'whitespace-only persona name renders (unknown)',
-        strpos($report, 'Profile Name: (unknown)') !== false,
+        strpos($report, '[B]Profile:[/B] (unknown)') !== false,
         "report was:\n$report"
     );
 
     // --- Test 3: BBCode in persona name is neutralized -----------------------
-    /** @return string[] all lines starting with "Profile Name: " */
+    /** @return string[] every merged profile line (persona name + SteamID link). */
     function profileNameLines(string $report): array
     {
         $found = [];
         foreach (explode("\n", $report) as $line) {
-            if (strpos($line, 'Profile Name: ') === 0) {
+            if (strpos($line, '[B]Profile:[/B] ') === 0) {
                 $found[] = $line;
             }
         }
@@ -249,11 +249,16 @@ namespace Issue6Tests {
         return $found[0] ?? null;
     }
 
-    /** Content between the [PLAIN] wrapper tags, or null if not wrapped. */
+    /**
+     * Content between the [PLAIN] wrapper tags on the profile line, or null if
+     * the name is not [PLAIN]-wrapped. Non-greedy up to the first ASCII
+     * [/PLAIN] (the real closer; any adversarial one is fullwidth-neutralized),
+     * which is immediately followed by the "   [B]·[/B]   " separator + link.
+     */
     function plainContent(?string $nameLine): ?string
     {
         if ($nameLine === null
-            || !preg_match('/^Profile Name: \[PLAIN\](.*)\[\/PLAIN\]$/s', $nameLine, $m)
+            || !preg_match('/^\[B\]Profile:\[\/B\] \[PLAIN\](.*?)\[\/PLAIN\]   \[B\]·\[\/B\]   /s', $nameLine, $m)
         ) {
             return null;
         }
@@ -317,7 +322,9 @@ namespace Issue6Tests {
         'adversarial [/PLAIN] cannot close the wrapper',
         $nameLine !== null
             && substr_count($nameLine, '[/PLAIN]') === 1
-            && substr($nameLine, -strlen('[/PLAIN]')) === '[/PLAIN]'
+            // The single real closer sits exactly where the builder put it:
+            // right after the name, before the "·" separator and the link.
+            && strpos($nameLine, '[/PLAIN]   [B]·[/B]   ') !== false
             && strpos($nameLine, '［/PLAIN］') !== false,
         'name line: ' . var_export($nameLine, true)
     );
@@ -346,10 +353,13 @@ namespace Issue6Tests {
     $reportLines = explode("\n", $report);
     check(
         'real ban lines unaffected by injected fake lines',
-        count(array_keys($reportLines, 'VAC Bans: 1', true)) === 1
+        // The genuine VAC line (count 1, flagged red) appears exactly once...
+        count(array_keys($reportLines, '[*][B]VAC bans:[/B] [COLOR=rgb(184, 49, 47)][B]1[/B][/COLOR]', true)) === 1
+            // ...and the attacker's injected "VAC Bans: 0" never becomes its own
+            // report line — the newlines collapsed, so it stays inside the name.
             && count(array_keys($reportLines, 'VAC Bans: 0', true)) === 0
-            && strpos($report, 'Last Ban: 1 month, 11 days ago (42 days)') !== false // humanized age (issue #37)
-            && strpos($report, '⚠️ Ban(s) detected') !== false,
+            && strpos($report, '[*][B]Last ban:[/B] 1 month, 11 days ago (42 days)') !== false // humanized age (issue #37)
+            && strpos($report, '⚠️ Bans detected') !== false,
         "report was:\n$report"
     );
 
@@ -504,7 +514,7 @@ namespace Issue6Tests {
     check(
         'runManual posts ban report with persona name',
         count($checker->posted) === 1
-            && strpos($checker->posted[0], 'Profile Name: [PLAIN]GamerDude[/PLAIN]') !== false,
+            && strpos($checker->posted[0], '[PLAIN]GamerDude[/PLAIN]') !== false,
         'posted: ' . var_export($checker->posted, true)
     );
 
@@ -524,8 +534,8 @@ namespace Issue6Tests {
         'runManual still posts ban report when summaries fetch fails (no exception)',
         $threw === null
             && count($checker->posted) === 1
-            && strpos($checker->posted[0], 'Profile Name: (unknown)') !== false
-            && strpos($checker->posted[0], 'VAC Bans: 0') !== false
+            && strpos($checker->posted[0], '[B]Profile:[/B] (unknown)') !== false
+            && strpos($checker->posted[0], '[*][B]VAC bans:[/B] 0') !== false
             && strpos($checker->posted[0], 'Steam API error') === false,
         'threw: ' . var_export($threw, true) . ' posted: ' . var_export($checker->posted, true)
     );
@@ -546,7 +556,7 @@ namespace Issue6Tests {
         'runManual GetPlayerBans failure still posts API-error reply',
         count($checker->posted) === 1
             && strpos($checker->posted[0], 'Steam API error') !== false
-            && strpos($checker->posted[0], 'Profile Name:') === false,
+            && strpos($checker->posted[0], '[B]Profile:[/B]') === false,
         'posted: ' . var_export($checker->posted, true)
     );
 
@@ -580,7 +590,7 @@ namespace Issue6Tests {
     check(
         'run() posts ban report with persona name',
         count($checker->posted) === 1
-            && strpos($checker->posted[0], 'Profile Name: [PLAIN]GamerDude[/PLAIN]') !== false,
+            && strpos($checker->posted[0], '[PLAIN]GamerDude[/PLAIN]') !== false,
         'posted: ' . var_export($checker->posted, true)
     );
 
@@ -596,7 +606,7 @@ namespace Issue6Tests {
         'run() still posts ban report when summaries fetch fails (no exception)',
         $threw === null
             && count($checker->posted) === 1
-            && strpos($checker->posted[0], 'Profile Name: (unknown)') !== false
+            && strpos($checker->posted[0], '[B]Profile:[/B] (unknown)') !== false
             && strpos($checker->posted[0], 'Steam API error') === false,
         'threw: ' . var_export($threw, true) . ' posted: ' . var_export($checker->posted, true)
     );
@@ -615,7 +625,7 @@ namespace Issue6Tests {
         'run() GetPlayerBans failure still posts API-error reply',
         count($checker->posted) === 1
             && strpos($checker->posted[0], 'Steam API error') !== false
-            && strpos($checker->posted[0], 'Profile Name:') === false,
+            && strpos($checker->posted[0], '[B]Profile:[/B]') === false,
         'posted: ' . var_export($checker->posted, true)
     );
     check(
@@ -643,8 +653,8 @@ namespace Issue6Tests {
         'runManual survives a throwing summaries fetch and posts full report',
         $threw === null
             && count($checker->posted) === 1
-            && strpos($checker->posted[0], 'Profile Name: (unknown)') !== false
-            && strpos($checker->posted[0], 'VAC Bans: 0') !== false
+            && strpos($checker->posted[0], '[B]Profile:[/B] (unknown)') !== false
+            && strpos($checker->posted[0], '[*][B]VAC bans:[/B] 0') !== false
             && strpos($checker->posted[0], 'No bans found') !== false,
         'threw: ' . var_export($threw, true) . ' posted: ' . var_export($checker->posted, true)
     );
@@ -669,8 +679,8 @@ namespace Issue6Tests {
         'run() survives a throwing summaries fetch and posts full report',
         $threw === null
             && count($checker->posted) === 1
-            && strpos($checker->posted[0], 'Profile Name: (unknown)') !== false
-            && strpos($checker->posted[0], 'VAC Bans: 0') !== false
+            && strpos($checker->posted[0], '[B]Profile:[/B] (unknown)') !== false
+            && strpos($checker->posted[0], '[*][B]VAC bans:[/B] 0') !== false
             && strpos($checker->posted[0], 'No bans found') !== false,
         'threw: ' . var_export($threw, true) . ' posted: ' . var_export($checker->posted, true)
     );

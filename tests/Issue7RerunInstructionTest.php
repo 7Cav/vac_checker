@@ -604,19 +604,19 @@ PIN,
 
     // Existing failure content must remain.
     $check('unresolvable reply keeps its header',
-        strpos($unresolvable, '[B]Steam VAC Check[/B]') === 0);
+        strpos($unresolvable, '[HEADING=2]Steam VAC Check[/HEADING]') === 0);
     $check('unresolvable reply keeps the manual-check warning',
         strpos($unresolvable,
             'Could not determine a valid Steam ID from the application. Manual check required.') !== false);
     $check('unresolvable reply keeps the raw value line',
-        strpos($unresolvable, 'Raw value: bogus-value') !== false);
+        strpos($unresolvable, 'Raw value:[/B] bogus-value') !== false);
     // SteamID line is a clickable profile link since issue #5.
     $check('API-error reply keeps the SteamID line',
         strpos($apiError,
-            'SteamID: [URL="https://steamcommunity.com/profiles/76561197960287930"]76561197960287930[/URL]') !== false);
+            'SteamID:[/B] [URL="https://steamcommunity.com/profiles/76561197960287930"]76561197960287930[/URL]') !== false);
     $check('API-error reply keeps the manual-check warning',
         strpos($apiError,
-            'Steam API error — could not complete the ban check. Manual check required.') !== false);
+            'Steam API error. Could not complete the ban check. Manual check required.') !== false);
 
     // AC4: successful ban report is unchanged (banned and clean variants).
     $bannedReport = $call('buildBanReportMessage', '76561197960287930', [
@@ -627,15 +627,16 @@ PIN,
         'DaysSinceLastBan' => 30,
     ]);
     $expectedBanned = implode("\n", [
-        '[B]Steam VAC Check[/B]',
-        'SteamID: [URL="https://steamcommunity.com/profiles/76561197960287930"]76561197960287930[/URL]', // linked since issue #5
-        'Profile Name: (unknown)', // null persona name (issue #6) — builder called without a fetch
-        'VAC Bans: 2',
-        'Game Bans: 1',
-        'Last Ban: 30 days ago (30 days)', // humanized age (issue #37); 30 days back from 2023-11-14 = 30 days
-        'Community Banned: Yes',
-        'Economy Ban: banned',
-        '[COLOR=rgb(184, 49, 47)][B]⚠️ Ban(s) detected — review required.[/B][/COLOR]',
+        '[HEADING=2]Steam VAC Check[/HEADING]',
+        '[B]Profile:[/B] (unknown)   [B]·[/B]   [URL="https://steamcommunity.com/profiles/76561197960287930"]76561197960287930[/URL]', // persona null (issue #6) + linked id (issue #5)
+        '[LIST]',
+        '[*][B]VAC bans:[/B] [COLOR=rgb(184, 49, 47)][B]2[/B][/COLOR]',
+        '[*][B]Game bans:[/B] [COLOR=rgb(184, 49, 47)][B]1[/B][/COLOR]',
+        '[*][B]Last ban:[/B] 30 days ago (30 days)', // humanized age (issue #37); 30 days back from 2023-11-14 = 30 days
+        '[*][B]Community ban:[/B] [COLOR=rgb(184, 49, 47)]Yes[/COLOR]',
+        '[*][B]Economy ban:[/B] [COLOR=rgb(184, 49, 47)]banned[/COLOR]',
+        '[/LIST]',
+        '[COLOR=rgb(184, 49, 47)][B]⚠️ Bans detected. Review required.[/B][/COLOR]',
     ]);
     $check('ban report (bans detected) is byte-for-byte unchanged',
         $bannedReport === $expectedBanned);
@@ -648,13 +649,14 @@ PIN,
         'DaysSinceLastBan' => 0,
     ]);
     $expectedClean = implode("\n", [
-        '[B]Steam VAC Check[/B]',
-        'SteamID: [URL="https://steamcommunity.com/profiles/76561197960287930"]76561197960287930[/URL]', // linked since issue #5
-        'Profile Name: (unknown)', // null persona name (issue #6) — builder called without a fetch
-        'VAC Bans: 0',
-        'Game Bans: 0',
-        'Community Banned: No',
-        'Economy Ban: none',
+        '[HEADING=2]Steam VAC Check[/HEADING]',
+        '[B]Profile:[/B] (unknown)   [B]·[/B]   [URL="https://steamcommunity.com/profiles/76561197960287930"]76561197960287930[/URL]', // persona null (issue #6) + linked id (issue #5)
+        '[LIST]',
+        '[*][B]VAC bans:[/B] 0',
+        '[*][B]Game bans:[/B] 0',
+        '[*][B]Community ban:[/B] No',
+        '[*][B]Economy ban:[/B] none',
+        '[/LIST]',
         '[COLOR=rgb(39, 179, 11)][B]✅ No bans found.[/B][/COLOR]',
     ]);
     $check('ban report (no bans) is byte-for-byte unchanged',

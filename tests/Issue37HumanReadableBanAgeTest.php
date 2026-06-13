@@ -326,8 +326,11 @@ namespace Issue37Tests {
     $report = $checker->callBuildBanReportMessage(STEAM_ID, banData(847), 'GamerDude');
     $ageLine = null;
     foreach (explode("\n", $report) as $line) {
-        if (strpos($line, 'Days Since Last Ban:') === 0
-            || strpos($line, 'Last Ban:') === 0) {
+        // The age line is the list item carrying the "Last ban:" label
+        // (legacy "Last Ban:" / "Days Since Last Ban:" kept for back-compat).
+        if (strpos($line, 'Last ban:') !== false
+            || strpos($line, 'Last Ban:') !== false
+            || strpos($line, 'Days Since Last Ban:') !== false) {
             $ageLine = $line;
             break;
         }
@@ -368,8 +371,8 @@ namespace Issue37Tests {
     $cleanReport = $checker->callBuildBanReportMessage(STEAM_ID, $clean, 'GamerDude');
     check(
         'clean report (no bans) shows no last-ban age line',
-        strpos($cleanReport, 'Last Ban') === false
-            && strpos($cleanReport, 'Days Since') === false,
+        stripos($cleanReport, 'Last ban') === false
+            && stripos($cleanReport, 'Days Since') === false,
         "report was:\n$cleanReport"
     );
     check(
