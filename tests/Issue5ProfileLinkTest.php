@@ -153,7 +153,10 @@ namespace Issue5Tests {
 
     const STEAM_ID = '76561198000000001';
 
-    const LINKED_ID_LINE = 'SteamID: [URL="https://steamcommunity.com/profiles/'
+    // The clickable profile-link markup (issue #5). Since the report redesign
+    // it lives inside the profile line of the ban report and on the bold
+    // "SteamID:" line of the API-error reply, rather than on its own line.
+    const LINKED_ID = '[URL="https://steamcommunity.com/profiles/'
         . STEAM_ID . '"]' . STEAM_ID . '[/URL]';
 
     const CLEAN_BAN_DATA = [
@@ -169,36 +172,40 @@ namespace Issue5Tests {
     $report = $checker->callBuildBanReportMessage(STEAM_ID, CLEAN_BAN_DATA, 'GamerDude');
     $lines = explode("\n", $report);
     check(
-        'ban report SteamID line is exactly the linked format',
-        in_array(LINKED_ID_LINE, $lines, true),
+        'ban report embeds the linked SteamID in the profile line',
+        in_array(true, array_map(
+            static fn ($l) => strpos($l, '[B]Profile:[/B] ') === 0 && strpos($l, LINKED_ID) !== false,
+            $lines
+        ), true),
         "report was:\n$report"
     );
 
-    // --- AC2: API-error reply SteamID line uses the identical format --------
+    // --- AC2: API-error reply SteamID line uses the identical link markup ---
     $checker = makeChecker();
     $apiError = $checker->callBuildApiErrorMessage(STEAM_ID);
     check(
         'API-error reply SteamID line is exactly the linked format',
-        in_array(LINKED_ID_LINE, explode("\n", $apiError), true),
+        in_array('[B]SteamID:[/B] ' . LINKED_ID, explode("\n", $apiError), true),
         "reply was:\n$apiError"
     );
 
     // --- AC3: visible link text is exactly the bare SteamID64 ---------------
-    // Parse the [URL] tag out of each reply's SteamID line and check both the
-    // href and the inner (visible) text byte-for-byte.
+    // Parse the [URL] tag out of whichever line carries it (profile line in the
+    // ban report, SteamID line in the API-error reply) and check both the href
+    // and the inner (visible) text byte-for-byte.
     foreach (['ban report' => $report, 'API-error' => $apiError] as $name => $reply) {
         $idLine = null;
         foreach (explode("\n", $reply) as $line) {
-            if (strpos($line, 'SteamID: ') === 0) {
+            if (strpos($line, '[URL="https://steamcommunity.com/profiles/') !== false) {
                 $idLine = $line;
                 break;
             }
         }
         $parsed = $idLine !== null
-            && preg_match('/^SteamID: \[URL="([^"]*)"\](.*)\[\/URL\]$/s', $idLine, $m);
+            && preg_match('/\[URL="([^"]*)"\]([^\[]*)\[\/URL\]/', $idLine, $m);
         check(
-            $name . ' SteamID line parses as a single [URL] tag',
-            (bool) $parsed,
+            $name . ' line carries exactly one [URL] tag',
+            $parsed && substr_count($idLine, '[URL') === 1,
             'line: ' . var_export($idLine, true)
         );
         check(
@@ -222,9 +229,9 @@ namespace Issue5Tests {
         "reply was:\n$unresolvable"
     );
     $expectedUnresolvable = implode("\n", [
-        '[B]Steam VAC Check[/B]',
+        '[HEADING=2]Steam VAC Check[/HEADING]',
         '[COLOR=rgb(184, 49, 47)][B]⚠️ Could not determine a valid Steam ID from the application. Manual check required.[/B][/COLOR]',
-        'Raw value: bogus-value',
+        '[B]Raw value:[/B] bogus-value',
         '[I]Staff can re-run this check by replying in this thread with [ICODE]!vac your Steam64ID or profile URL[/ICODE].[/I]',
     ]);
     check(
@@ -246,15 +253,18 @@ namespace Issue5Tests {
         'DaysSinceLastBan' => 30,
     ], 'GamerDude');
     $expectedBanned = implode("\n", [
-        '[B]Steam VAC Check[/B]',
-        LINKED_ID_LINE,
-        'Profile Name: [PLAIN]GamerDude[/PLAIN]',
-        'VAC Bans: 2',
-        'Game Bans: 1',
-        'Days Since Last Ban: 30',
-        'Community Banned: Yes',
-        'Economy Ban: banned',
-        '[COLOR=rgb(184, 49, 47)][B]⚠️ Ban(s) detected — review required.[/B][/COLOR]',
+        '[HEADING=2]Steam VAC Check[/HEADING]',
+        '[B]Profile:[/B] [PLAIN]GamerDude[/PLAIN]   [B]·[/B]   ' . LINKED_ID,
+        '[LIST]',
+        '[*][B]VAC bans:[/B] [COLOR=rgb(184, 49, 47)][B]2[/B][/COLOR]',
+        '[*][B]Game bans:[/B] [COLOR=rgb(184, 49, 47)][B]1[/B][/COLOR]',
+        // Issue #37: humanized age line (anchored to \XF::$time = 1700000000,
+        // i.e. 2023-11-14 UTC; 30 days back is 2023-10-15 = exactly 30 days).
+        '[*][B]Last ban:[/B] 30 days ago (30 days)',
+        '[*][B]Community ban:[/B] [COLOR=rgb(184, 49, 47)]Yes[/COLOR]',
+        '[*][B]Economy ban:[/B] [COLOR=rgb(184, 49, 47)]banned[/COLOR]',
+        '[/LIST]',
+        '[COLOR=rgb(184, 49, 47)][B]⚠️ Bans detected. Review required.[/B][/COLOR]',
     ]);
     check(
         'ban report (bans detected) matches byte-for-byte with linked SteamID line',
@@ -263,13 +273,14 @@ namespace Issue5Tests {
     );
 
     $expectedClean = implode("\n", [
-        '[B]Steam VAC Check[/B]',
-        LINKED_ID_LINE,
-        'Profile Name: [PLAIN]GamerDude[/PLAIN]',
-        'VAC Bans: 0',
-        'Game Bans: 0',
-        'Community Banned: No',
-        'Economy Ban: none',
+        '[HEADING=2]Steam VAC Check[/HEADING]',
+        '[B]Profile:[/B] [PLAIN]GamerDude[/PLAIN]   [B]·[/B]   ' . LINKED_ID,
+        '[LIST]',
+        '[*][B]VAC bans:[/B] 0',
+        '[*][B]Game bans:[/B] 0',
+        '[*][B]Community ban:[/B] No',
+        '[*][B]Economy ban:[/B] none',
+        '[/LIST]',
         '[COLOR=rgb(39, 179, 11)][B]✅ No bans found.[/B][/COLOR]',
     ]);
     check(
@@ -279,9 +290,9 @@ namespace Issue5Tests {
     );
 
     $expectedApiError = implode("\n", [
-        '[B]Steam VAC Check[/B]',
-        LINKED_ID_LINE,
-        '[COLOR=rgb(184, 49, 47)][B]⚠️ Steam API error — could not complete the ban check. Manual check required.[/B][/COLOR]',
+        '[HEADING=2]Steam VAC Check[/HEADING]',
+        '[B]SteamID:[/B] ' . LINKED_ID,
+        '[COLOR=rgb(184, 49, 47)][B]⚠️ Steam API error. Could not complete the ban check. Manual check required.[/B][/COLOR]',
         '[I]Staff can re-run this check by replying in this thread with [ICODE]!vac your Steam64ID or profile URL[/ICODE].[/I]',
     ]);
     check(
@@ -317,8 +328,8 @@ namespace Issue5Tests {
     check(
         'runManual posts ban report containing the linked SteamID line',
         count($checker->posted) === 1
-            && strpos($checker->posted[0], LINKED_ID_LINE) !== false
-            && strpos($checker->posted[0], 'Profile Name: [PLAIN]GamerDude[/PLAIN]') !== false,
+            && strpos($checker->posted[0], LINKED_ID) !== false
+            && strpos($checker->posted[0], '[PLAIN]GamerDude[/PLAIN]') !== false,
         'posted: ' . var_export($checker->posted, true)
     );
 
@@ -331,7 +342,7 @@ namespace Issue5Tests {
     check(
         'runManual GetPlayerBans failure posts API-error reply with the linked SteamID line',
         count($checker->posted) === 1
-            && strpos($checker->posted[0], LINKED_ID_LINE) !== false
+            && strpos($checker->posted[0], LINKED_ID) !== false
             && strpos($checker->posted[0], 'Steam API error') !== false,
         'posted: ' . var_export($checker->posted, true)
     );
@@ -356,7 +367,7 @@ namespace Issue5Tests {
     check(
         'run() posts ban report containing the linked SteamID line',
         count($checker->posted) === 1
-            && strpos($checker->posted[0], LINKED_ID_LINE) !== false,
+            && strpos($checker->posted[0], LINKED_ID) !== false,
         'posted: ' . var_export($checker->posted, true)
     );
 
@@ -376,7 +387,7 @@ namespace Issue5Tests {
     check(
         'runManual(profile URL) posts ban report with the linked bare-ID SteamID line',
         count($checker->posted) === 1
-            && strpos($checker->posted[0], LINKED_ID_LINE) !== false
+            && strpos($checker->posted[0], LINKED_ID) !== false
             && strpos($checker->posted[0], $doubleUrlHref) === false,
         'posted: ' . var_export($checker->posted, true)
     );
@@ -390,7 +401,7 @@ namespace Issue5Tests {
     check(
         'runManual(profile URL) API failure posts API-error reply with the linked bare-ID SteamID line',
         count($checker->posted) === 1
-            && strpos($checker->posted[0], LINKED_ID_LINE) !== false
+            && strpos($checker->posted[0], LINKED_ID) !== false
             && strpos($checker->posted[0], 'Steam API error') !== false
             && strpos($checker->posted[0], $doubleUrlHref) === false,
         'posted: ' . var_export($checker->posted, true)
@@ -416,7 +427,7 @@ namespace Issue5Tests {
     check(
         'run() with profile-URL field posts ban report with the linked bare-ID SteamID line',
         count($checker->posted) === 1
-            && strpos($checker->posted[0], LINKED_ID_LINE) !== false
+            && strpos($checker->posted[0], LINKED_ID) !== false
             && strpos($checker->posted[0], $doubleUrlHref) === false,
         'posted: ' . var_export($checker->posted, true)
     );

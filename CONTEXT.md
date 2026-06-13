@@ -34,8 +34,31 @@ arguments that dissolve entirely during normalization (`<>`, `&lt;&gt;`,
 `&nbsp;`).
 _Avoid_: no-arg command, empty command
 
+**Last-ban age**:
+The `Last Ban:` line of a ban report: Steam's raw `DaysSinceLastBan` count
+rendered as a calendar-accurate duration (`2 years, 3 months, 24 days ago`)
+with the raw figure kept as a parenthetical. Anchored to the XF clock and
+broken down against the real Gregorian calendar, so leap days land where they
+actually fall — never fixed 365-day years or 30-day months. Leading zero units
+are omitted; `0` reads as `today`. Shown only when the report has bans.
+_Avoid_: days since last ban (the raw count), ban age in days.
+
 **Trailing-token rule**:
 The trigger condition for responding to a degenerate invocation: fires only
 after the primary `!vac` match finds a genuine no-match (a PCRE error there
 suppresses the rule) AND the normalized post ends with a standalone `!vac`. Conversational mentions that end a post ("just use !vac")
 deliberately trigger it; punctuation-glued mentions ("use !vac.") do not.
+
+**Steam-field presence gate**:
+The structural check on a PC enlistment's OP that decides between a silent skip
+and a loud failure (#36). When the Steam-identifier field label
+(`Steam64ID or Steam Account URL/Link`) is _absent_ from the post — a non-Steam
+PC form such as Star Citizen, which carries an RSI Profile link instead — there
+is no Steam identity to screen, so the checker returns quietly, the same as a
+non-PC platform. When the label is _present_ but its value is empty or won't
+resolve, the loud "manual check required" reply (with the Re-run instruction)
+still fires: that is the "fail loudly, never guess" case
+(`.out-of-scope/username-fallback-resolution.md`, #8). Keyed on the label's
+absence, never on a hardcoded game name.
+_Avoid_: Star Citizen check, game-name skip (the discriminator is the missing
+field label, not the title).

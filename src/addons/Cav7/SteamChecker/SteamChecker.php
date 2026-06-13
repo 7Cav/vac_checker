@@ -4,6 +4,10 @@ namespace Cav7\SteamChecker;
 
 class SteamChecker
 {
+    /** Status colours shared across every bot reply (red = flagged, green = clean). */
+    private const RED   = 'rgb(184, 49, 47)';
+    private const GREEN = 'rgb(39, 179, 11)';
+
     /** @var \XF\Entity\Thread */
     protected $thread;
 
@@ -69,12 +73,30 @@ class SteamChecker
             return;
         }
 
+        // --- Steam-field presence gate (issue #36) --------------------------
+        // Star Citizen (and any future non-Steam PC title) selects a PC
+        // platform but its enlistment form omits the Steam-identifier field
+        // entirely, carrying an RSI Profile link instead. There is no Steam
+        // account to screen, so skip silently — the same quiet return as a
+        // non-PC platform. The discriminator is structural: the ABSENCE of the
+        // field label, not a hardcoded game name. This does not breach the
+        // "fail loudly, never guess" convention (#8); that covers a Steam
+        // identity that exists but can't be trusted. Here none exists at all.
+        $steamFieldLabel = 'Steam64ID or Steam Account URL/Link';
+        if (!$this->fieldLabelPresent($message, $steamFieldLabel)) {
+            $this->debug('Steam-identifier field label absent — non-Steam PC enlistment, skipping.');
+            return;
+        }
+
         // --- Steam ID extraction --------------------------------------------
-        $rawSteamField = $this->extractNextLineField($message, 'Steam64ID or Steam Account URL/Link');
+        // The label IS present. If its value is empty/garbage, extract returns
+        // null and we keep the loud "manual check required" reply — staff rely
+        // on it (#8). Only the absent-label case above skips silently.
+        $rawSteamField = $this->extractNextLineField($message, $steamFieldLabel);
         $this->debug('Raw Steam field extracted: ' . var_export($rawSteamField, true));
 
         if ($rawSteamField === null) {
-            $this->postReply($this->buildUnresolvableMessage('(field not found in post)'));
+            $this->postReply($this->buildUnresolvableMessage('(field value empty in post)'));
             return;
         }
 
@@ -199,6 +221,27 @@ class SteamChecker
     // -------------------------------------------------------------------------
     // Post-body parsing
     // -------------------------------------------------------------------------
+
+    /**
+     * Reports whether a field LABEL appears anywhere in the post, independent
+     * of whether it carries a value. This is the structural discriminator for
+     * issue #36: extractNextLineField() returns null both when the label is
+     * absent AND when it's present but the value is empty/garbage, so the run()
+     * gate needs a separate "is the label here at all?" signal to tell a
+     * non-Steam PC form (skip silently) from a blank/garbage Steam value (keep
+     * the loud reply). Uses the same per-line BBCode strip + case-insensitive
+     * substring match as extractNextLineField().
+     */
+    protected function fieldLabelPresent(string $message, string $fieldLabel): bool
+    {
+        foreach (explode("\n", $message) as $line) {
+            if (stripos($this->stripBbCode($line), $fieldLabel) !== false) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /**
      * Finds a BBCode label line and returns the associated value.
@@ -535,6 +578,16 @@ class SteamChecker
     // Message builders
     // -------------------------------------------------------------------------
 
+    /**
+     * The shared title every bot reply opens with. A [HEADING] renders as a
+     * styled section header in XF, so each report reads as one tidy block
+     * rather than a bold first line floating above loose text.
+     */
+    private static function header(): string
+    {
+        return '[HEADING=2]Steam VAC Check[/HEADING]';
+    }
+
     protected function buildBanReportMessage(string $steamId64, array $banData, ?string $personaName = null): string
     {
         $vacBans       = (int) ($banData['NumberOfVACBans'] ?? 0);
@@ -555,28 +608,97 @@ class SteamChecker
             ? '[PLAIN]' . $this->neutralizeBbCode(trim($personaName)) . '[/PLAIN]'
             : '(unknown)';
 
+        // Flag a value red only when it signals a ban, so a clean report stays
+        // calm and the eye lands on the actual problems; counts also go bold.
+        $vacStr  = $vacBans  > 0 ? '[COLOR=' . self::RED . '][B]' . $vacBans . '[/B][/COLOR]'  : (string) $vacBans;
+        $gameStr = $gameBans > 0 ? '[COLOR=' . self::RED . '][B]' . $gameBans . '[/B][/COLOR]' : (string) $gameBans;
+        $commStr = $communityBan ? '[COLOR=' . self::RED . ']Yes[/COLOR]' : 'No';
+        $econStr = ($economyBan === 'none' || $economyBan === '')
+            ? (string) $economyBan
+            : '[COLOR=' . self::RED . ']' . $economyBan . '[/COLOR]';
+
         $lines = [
-            '[B]Steam VAC Check[/B]',
-            'SteamID: ' . $this->buildSteamIdLink($steamId64),
-            'Profile Name: ' . $nameLine,
-            'VAC Bans: ' . $vacBans,
-            'Game Bans: ' . $gameBans,
+            self::header(),
+            '[B]Profile:[/B] ' . $nameLine . '   [B]·[/B]   ' . $this->buildSteamIdLink($steamId64),
+            '[LIST]',
+            '[*][B]VAC bans:[/B] ' . $vacStr,
+            '[*][B]Game bans:[/B] ' . $gameStr,
         ];
 
         if ($hasBans) {
-            $lines[] = 'Days Since Last Ban: ' . $daysSince;
+            // Render the raw Steam "days since" figure as a calendar-accurate
+            // duration (issue #37), keeping the raw count as a parenthetical.
+            // "today" reads naturally on its own; a real span gets an "ago".
+            $age  = $this->formatBanAge($daysSince);
+            $when = ($daysSince <= 0) ? $age : $age . ' ago';
+            $lines[] = '[*][B]Last ban:[/B] ' . $when . ' (' . $daysSince . ' days)';
         }
 
-        $lines[] = 'Community Banned: ' . ($communityBan ? 'Yes' : 'No');
-        $lines[] = 'Economy Ban: ' . $economyBan;
+        $lines[] = '[*][B]Community ban:[/B] ' . $commStr;
+        $lines[] = '[*][B]Economy ban:[/B] ' . $econStr;
+        $lines[] = '[/LIST]';
 
         if ($hasBans) {
-            $lines[] = '[COLOR=rgb(184, 49, 47)][B]⚠️ Ban(s) detected — review required.[/B][/COLOR]';
+            $lines[] = '[COLOR=' . self::RED . '][B]⚠️ Bans detected. Review required.[/B][/COLOR]';
         } else {
-            $lines[] = '[COLOR=rgb(39, 179, 11)][B]✅ No bans found.[/B][/COLOR]';
+            $lines[] = '[COLOR=' . self::GREEN . '][B]✅ No bans found.[/B][/COLOR]';
         }
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * Turns a raw Steam "days since last ban" count into a human-readable
+     * calendar duration like "2 years, 3 months, 24 days" (issue #37).
+     *
+     * The breakdown is calendar-accurate, not arithmetic on fixed 365-day
+     * years or 30-day months: it anchors to now (the XF facade clock) and
+     * subtracts N days, then lets DateTime::diff resolve the span against the
+     * real Gregorian calendar — so leap days fall where they actually land.
+     *
+     * Pluralization is per-unit ("1 day", "2 days"). Zero-valued units are
+     * omitted, leading ("3 months, 24 days", never "0 years, 3 months, 24
+     * days") and interior ("1 year, 5 days", never "1 year, 0 months, 5 days")
+     * alike. Zero (and any negative, which Steam never sends) reads as "today".
+     */
+    protected function formatBanAge(int $days): string
+    {
+        if ($days <= 0) {
+            return 'today';
+        }
+
+        // Midnight UTC keeps the day arithmetic free of DST/clock-time edges;
+        // we only care about the calendar breakdown, not wall-clock precision.
+        $now = (new \DateTimeImmutable('@' . \XF::$time))
+            ->setTimezone(new \DateTimeZone('UTC'))
+            ->setTime(0, 0, 0);
+        $then = $now->sub(new \DateInterval('P' . $days . 'D'));
+        $diff = $now->diff($then);
+
+        $units = [
+            'year'  => $diff->y,
+            'month' => $diff->m,
+            'day'   => $diff->d,
+        ];
+
+        // Emit one term per non-zero unit, in calendar order. Zero-valued units
+        // are skipped entirely — leading ("3 months, 24 days") and interior
+        // ("1 year, 5 days") alike — since a zero adds nothing to the reading.
+        $parts = [];
+        foreach ($units as $label => $value) {
+            if ($value === 0) {
+                continue;
+            }
+            $parts[] = $value . ' ' . $label . ($value === 1 ? '' : 's');
+        }
+
+        // Guard: a positive span always has at least one non-zero unit, but if
+        // the calendar ever collapsed everything to zero, fall back to days.
+        if ($parts === []) {
+            return $days . ($days === 1 ? ' day' : ' days');
+        }
+
+        return implode(', ', $parts);
     }
 
     /**
@@ -594,9 +716,9 @@ class SteamChecker
     protected function buildUnresolvableMessage(string $rawValue): string
     {
         return implode("\n", [
-            '[B]Steam VAC Check[/B]',
-            '[COLOR=rgb(184, 49, 47)][B]⚠️ Could not determine a valid Steam ID from the application. Manual check required.[/B][/COLOR]',
-            'Raw value: ' . $rawValue,
+            self::header(),
+            '[COLOR=' . self::RED . '][B]⚠️ Could not determine a valid Steam ID from the application. Manual check required.[/B][/COLOR]',
+            '[B]Raw value:[/B] ' . $rawValue,
             $this->buildRerunInstructionLine(),
         ]);
     }
@@ -604,22 +726,25 @@ class SteamChecker
     protected function buildApiErrorMessage(string $steamId64): string
     {
         return implode("\n", [
-            '[B]Steam VAC Check[/B]',
-            'SteamID: ' . $this->buildSteamIdLink($steamId64),
-            '[COLOR=rgb(184, 49, 47)][B]⚠️ Steam API error — could not complete the ban check. Manual check required.[/B][/COLOR]',
+            self::header(),
+            '[B]SteamID:[/B] ' . $this->buildSteamIdLink($steamId64),
+            '[COLOR=' . self::RED . '][B]⚠️ Steam API error. Could not complete the ban check. Manual check required.[/B][/COLOR]',
             $this->buildRerunInstructionLine(),
         ]);
     }
 
     /**
-     * Two-line usage reply for a degenerate invocation (issue #25): a
-     * hardcoded lead-in plus the re-run instruction taken verbatim from its
+     * Usage reply for a degenerate invocation (issue #25): the shared header,
+     * a hardcoded lead-in, and the re-run instruction taken verbatim from its
      * single source below — never fork a near-duplicate of that string.
      */
     protected function buildDegenerateInvocationMessage(): string
     {
-        return 'No Steam ID was found in that [ICODE]!vac[/ICODE] command.'
-            . "\n" . $this->buildRerunInstructionLine();
+        return implode("\n", [
+            self::header(),
+            'No Steam ID was found in that [ICODE]!vac[/ICODE] command.',
+            $this->buildRerunInstructionLine(),
+        ]);
     }
 
     /**

@@ -242,6 +242,7 @@ namespace {
     // the lead-in (exact bytes pinned by the #25 brief) and the re-run
     // instruction taken LIVE from buildRerunInstructionLine() — the posted
     // second line must equal whatever that single source currently says.
+    $header = '[HEADING=2]Steam VAC Check[/HEADING]';
     $leadIn = 'No Steam ID was found in that [ICODE]!vac[/ICODE] command.';
     $resetState(); // options must exist before the real constructor reads them
     $rerunRef = new \ReflectionMethod(\Cav7\SteamChecker\SteamChecker::class, 'buildRerunInstructionLine');
@@ -249,7 +250,7 @@ namespace {
     $rerunLine = $rerunRef->invoke(
         new \Cav7\SteamChecker\SteamChecker(new \XF\Entity\Thread())
     );
-    $expectedUsageReply = $leadIn . "\n" . $rerunLine;
+    $expectedUsageReply = $header . "\n" . $leadIn . "\n" . $rerunLine;
 
     $realId = '76561198000000001';
 
@@ -302,11 +303,13 @@ namespace {
     $invoke($post);
     $reply = \XF::$postedMessages[0] ?? '';
     $replyLines = explode("\n", $reply);
-    $check('usage reply has exactly two lines', count($replyLines) === 2);
-    $check('usage reply line 1 is the exact lead-in bytes',
-        ($replyLines[0] ?? '') === $leadIn);
-    $check('usage reply line 2 is the re-run instruction verbatim from its single source',
-        ($replyLines[1] ?? '') === $rerunLine);
+    $check('usage reply has exactly three lines', count($replyLines) === 3);
+    $check('usage reply line 1 is the shared header',
+        ($replyLines[0] ?? '') === $header);
+    $check('usage reply line 2 is the exact lead-in bytes',
+        ($replyLines[1] ?? '') === $leadIn);
+    $check('usage reply line 3 is the re-run instruction verbatim from its single source',
+        ($replyLines[2] ?? '') === $rerunLine);
     $check('usage reply mentions !vac exactly twice (lead-in + instruction)',
         substr_count(strtolower($reply), '!vac') === 2);
 
@@ -422,7 +425,7 @@ namespace {
         count(\XF::$postedMessages) === 1);
     $check('invalid token: reply is the OLD unresolvable reply',
         strpos(\XF::$postedMessages[0] ?? '', 'Could not determine a valid Steam ID') !== false
-        && strpos(\XF::$postedMessages[0] ?? '', 'Raw value: bogus-token') !== false);
+        && strpos(\XF::$postedMessages[0] ?? '', 'Raw value:[/B] bogus-token') !== false);
     $check('invalid token: reply is never the new usage lead-in',
         strpos(\XF::$postedMessages[0] ?? '', $leadIn) === false);
     $check('invalid token: logs stay clean', $logsClean());

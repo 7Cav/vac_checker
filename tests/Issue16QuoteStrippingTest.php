@@ -199,9 +199,9 @@ namespace {
     // Realistic bot failure reply (wording pinned by Issue7 suite). The
     // instruction line is what gets quoted into staff replies.
     $failureReply = implode("\n", [
-        '[B]Steam VAC Check[/B]',
-        'SteamID: [URL="https://steamcommunity.com/profiles/76561197960287930"]76561197960287930[/URL]',
-        '[COLOR=rgb(184, 49, 47)][B]⚠️ Steam API error — could not complete the ban check. Manual check required.[/B][/COLOR]',
+        '[HEADING=2]Steam VAC Check[/HEADING]',
+        '[B]SteamID:[/B] [URL="https://steamcommunity.com/profiles/76561197960287930"]76561197960287930[/URL]',
+        '[COLOR=rgb(184, 49, 47)][B]⚠️ Steam API error. Could not complete the ban check. Manual check required.[/B][/COLOR]',
         '[I]Staff can re-run this check by replying in this thread with [ICODE]!vac your Steam64ID or profile URL[/ICODE].[/I]',
     ]);
     $quotedFailureReply = '[QUOTE="VAC Bot, post: 123, member: 99"]' . "\n"
