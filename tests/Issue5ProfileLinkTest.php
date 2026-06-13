@@ -251,7 +251,9 @@ namespace Issue5Tests {
         'Profile Name: [PLAIN]GamerDude[/PLAIN]',
         'VAC Bans: 2',
         'Game Bans: 1',
-        'Days Since Last Ban: 30',
+        // Issue #37: humanized age line (anchored to \XF::$time = 1700000000,
+        // i.e. 2023-11-14 UTC; 30 days back is 2023-10-15 = exactly 30 days).
+        'Last Ban: 30 days ago (30 days)',
         'Community Banned: Yes',
         'Economy Ban: banned',
         '[COLOR=rgb(184, 49, 47)][B]⚠️ Ban(s) detected — review required.[/B][/COLOR]',

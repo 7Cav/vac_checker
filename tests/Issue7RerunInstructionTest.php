@@ -23,6 +23,9 @@ namespace XF\Entity {
 namespace {
     class XF
     {
+        // Anchor for the humanized last-ban age (issue #37): 2023-11-14 UTC.
+        public static $time = 1700000000;
+
         public static function options(): object
         {
             return (object) [
@@ -629,7 +632,7 @@ PIN,
         'Profile Name: (unknown)', // null persona name (issue #6) — builder called without a fetch
         'VAC Bans: 2',
         'Game Bans: 1',
-        'Days Since Last Ban: 30',
+        'Last Ban: 30 days ago (30 days)', // humanized age (issue #37); 30 days back from 2023-11-14 = 30 days
         'Community Banned: Yes',
         'Economy Ban: banned',
         '[COLOR=rgb(184, 49, 47)][B]⚠️ Ban(s) detected — review required.[/B][/COLOR]',

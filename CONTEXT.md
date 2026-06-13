@@ -34,6 +34,15 @@ arguments that dissolve entirely during normalization (`<>`, `&lt;&gt;`,
 `&nbsp;`).
 _Avoid_: no-arg command, empty command
 
+**Last-ban age**:
+The `Last Ban:` line of a ban report: Steam's raw `DaysSinceLastBan` count
+rendered as a calendar-accurate duration (`2 years, 3 months, 24 days ago`)
+with the raw figure kept as a parenthetical. Anchored to the XF clock and
+broken down against the real Gregorian calendar, so leap days land where they
+actually fall — never fixed 365-day years or 30-day months. Leading zero units
+are omitted; `0` reads as `today`. Shown only when the report has bans.
+_Avoid_: days since last ban (the raw count), ban age in days.
+
 **Trailing-token rule**:
 The trigger condition for responding to a degenerate invocation: fires only
 after the primary `!vac` match finds a genuine no-match (a PCRE error there

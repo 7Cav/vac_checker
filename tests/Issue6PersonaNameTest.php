@@ -348,7 +348,7 @@ namespace Issue6Tests {
         'real ban lines unaffected by injected fake lines',
         count(array_keys($reportLines, 'VAC Bans: 1', true)) === 1
             && count(array_keys($reportLines, 'VAC Bans: 0', true)) === 0
-            && strpos($report, 'Days Since Last Ban: 42') !== false
+            && strpos($report, 'Last Ban: 1 month, 11 days ago (42 days)') !== false // humanized age (issue #37)
             && strpos($report, '⚠️ Ban(s) detected') !== false,
         "report was:\n$report"
     );

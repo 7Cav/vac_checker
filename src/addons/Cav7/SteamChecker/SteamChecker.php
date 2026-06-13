@@ -564,7 +564,12 @@ class SteamChecker
         ];
 
         if ($hasBans) {
-            $lines[] = 'Days Since Last Ban: ' . $daysSince;
+            // Render the raw Steam "days since" figure as a calendar-accurate
+            // duration (issue #37), keeping the raw count as a parenthetical.
+            // "today" reads naturally on its own; a real span gets an "ago".
+            $age  = $this->formatBanAge($daysSince);
+            $line = ($daysSince <= 0) ? $age : $age . ' ago';
+            $lines[] = 'Last Ban: ' . $line . ' (' . $daysSince . ' days)';
         }
 
         $lines[] = 'Community Banned: ' . ($communityBan ? 'Yes' : 'No');
@@ -577,6 +582,61 @@ class SteamChecker
         }
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * Turns a raw Steam "days since last ban" count into a human-readable
+     * calendar duration like "2 years, 3 months, 24 days" (issue #37).
+     *
+     * The breakdown is calendar-accurate, not arithmetic on fixed 365-day
+     * years or 30-day months: it anchors to now (the XF facade clock) and
+     * subtracts N days, then lets DateTime::diff resolve the span against the
+     * real Gregorian calendar — so leap days fall where they actually land.
+     *
+     * Pluralization is per-unit ("1 day", "2 days"). Leading zero-valued units
+     * are omitted ("3 months, 24 days", never "0 years, 3 months, 24 days"),
+     * while interior zero units are kept so the remaining terms stay adjacent
+     * in calendar order (e.g. "1 year, 5 days"). Zero (and any negative, which
+     * Steam never sends) reads as "today".
+     */
+    protected function formatBanAge(int $days): string
+    {
+        if ($days <= 0) {
+            return 'today';
+        }
+
+        // Midnight UTC keeps the day arithmetic free of DST/clock-time edges;
+        // we only care about the calendar breakdown, not wall-clock precision.
+        $now = (new \DateTimeImmutable('@' . \XF::$time))
+            ->setTimezone(new \DateTimeZone('UTC'))
+            ->setTime(0, 0, 0);
+        $then = $now->sub(new \DateInterval('P' . $days . 'D'));
+        $diff = $now->diff($then);
+
+        $units = [
+            'year'  => $diff->y,
+            'month' => $diff->m,
+            'day'   => $diff->d,
+        ];
+
+        // Emit one term per non-zero unit, in calendar order. Zero-valued units
+        // are skipped entirely — leading ("3 months, 24 days") and interior
+        // ("1 year, 5 days") alike — since a zero adds nothing to the reading.
+        $parts = [];
+        foreach ($units as $label => $value) {
+            if ($value === 0) {
+                continue;
+            }
+            $parts[] = $value . ' ' . $label . ($value === 1 ? '' : 's');
+        }
+
+        // Guard: a positive span always has at least one non-zero unit, but if
+        // the calendar ever collapsed everything to zero, fall back to days.
+        if ($parts === []) {
+            return $days . ($days === 1 ? ' day' : ' days');
+        }
+
+        return implode(', ', $parts);
     }
 
     /**
