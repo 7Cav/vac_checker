@@ -69,12 +69,30 @@ class SteamChecker
             return;
         }
 
+        // --- Steam-field presence gate (issue #36) --------------------------
+        // Star Citizen (and any future non-Steam PC title) selects a PC
+        // platform but its enlistment form omits the Steam-identifier field
+        // entirely, carrying an RSI Profile link instead. There is no Steam
+        // account to screen, so skip silently — the same quiet return as a
+        // non-PC platform. The discriminator is structural: the ABSENCE of the
+        // field label, not a hardcoded game name. This does not breach the
+        // "fail loudly, never guess" convention (#8); that covers a Steam
+        // identity that exists but can't be trusted. Here none exists at all.
+        $steamFieldLabel = 'Steam64ID or Steam Account URL/Link';
+        if (!$this->fieldLabelPresent($message, $steamFieldLabel)) {
+            $this->debug('Steam-identifier field label absent — non-Steam PC enlistment, skipping.');
+            return;
+        }
+
         // --- Steam ID extraction --------------------------------------------
-        $rawSteamField = $this->extractNextLineField($message, 'Steam64ID or Steam Account URL/Link');
+        // The label IS present. If its value is empty/garbage, extract returns
+        // null and we keep the loud "manual check required" reply — staff rely
+        // on it (#8). Only the absent-label case above skips silently.
+        $rawSteamField = $this->extractNextLineField($message, $steamFieldLabel);
         $this->debug('Raw Steam field extracted: ' . var_export($rawSteamField, true));
 
         if ($rawSteamField === null) {
-            $this->postReply($this->buildUnresolvableMessage('(field not found in post)'));
+            $this->postReply($this->buildUnresolvableMessage('(field value empty in post)'));
             return;
         }
 
@@ -199,6 +217,27 @@ class SteamChecker
     // -------------------------------------------------------------------------
     // Post-body parsing
     // -------------------------------------------------------------------------
+
+    /**
+     * Reports whether a field LABEL appears anywhere in the post, independent
+     * of whether it carries a value. This is the structural discriminator for
+     * issue #36: extractNextLineField() returns null both when the label is
+     * absent AND when it's present but the value is empty/garbage, so the run()
+     * gate needs a separate "is the label here at all?" signal to tell a
+     * non-Steam PC form (skip silently) from a blank/garbage Steam value (keep
+     * the loud reply). Uses the same per-line BBCode strip + case-insensitive
+     * substring match as extractNextLineField().
+     */
+    protected function fieldLabelPresent(string $message, string $fieldLabel): bool
+    {
+        foreach (explode("\n", $message) as $line) {
+            if (stripos($this->stripBbCode($line), $fieldLabel) !== false) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /**
      * Finds a BBCode label line and returns the associated value.
